@@ -1,16 +1,19 @@
-# 🧪 MockLab
+# 🧪 MockLab v2.0
 
-> **웹 기반 동적 API Mocking & Network Inspection 도구**
-> 백엔드 API 개발 완료 여부와 상관없이, 프론트엔드 브라우저 상에서 동적으로 API 응답·상태 코드·네트워크 지연 시간을 제어하고 테스트할 수 있는 프론트엔드 전용 API Mocking 도구입니다.
+> **웹 기반 동적 API Mocking, Scenario Management & Network Inspection 도구**  
+> 백엔드 API 개발 완료 여부와 상관없이, 브라우저 상에서 동적으로 API 응답·상태 코드·네트워크 지연 시간을 제어하고 테스트할 수 있는 프론트엔드 전용 API Mocking 샌드박스입니다.
 
 ---
 
 ## ✨ Key Features
 
-- **⚡ 동적 MSW 핸들러 바인딩**: Zustand 스토어 상태 변경 시 앱 새로고침 없이 즉시 네트워크 가로채기 규칙이 실시간 갱신됩니다.
-- **🎨 Monaco Editor 통합**: VS Code 기반 에디터로 JSON Response Body에 대한 신속한 편집 및 문법 검증을 지원합니다.
-- **⏱️ 네트워크 지연(Delay) 시뮬레이션**: API 응답 대기 시간을 임의로 설정하여 로딩 스피너 및 스켈레톤 UI 동작을 손쉽게 검증할 수 있습니다.
-- **📜 실시간 Inspector Log**: MSW가 가로챈 모든 HTTP 요청/응답 트래픽을 화면 하단 패널에서 실시간 모니터링합니다.
+- **⚡ 동적 MSW v2 핸들러 바인딩**: Zustand 스토어 상태 변경 시 앱 새로고침 없이 실시간으로 네트워크 가로채기 규칙이 갱신됩니다.
+- **🔀 Path Variable (`:id`) & Dynamic Interpolation**: `/api/users/:id`와 같은 경로 파라미터를 지원하며, Response Body 내 `{{params.id}}` 템플릿 변수를 실시간 치환하여 반환합니다.
+- **🎭 시나리오 프리셋 (Scenario Presets)**: `정상 동작(Happy Path)`, `전체 500 장애` 등 미리 정의된 API 응답 구성 셋을 원클릭으로 손쉽게 스위칭합니다.
+- **📄 Swagger / OpenAPI Auto Import**: Swagger JSON 명세서를 업로드하면 정의된 모든 API Path와 HTTP Method를 읽어와 Mock Endpoint로 자동 생성합니다.
+- **⏱️ 네트워크 지연 (Delay) 시뮬레이션**: API 응답 대기 시간(ms)을 임의로 설정하여 로딩 스피너 및 스켈레톤 UI 동작을 손쉽게 검증합니다.
+- **🎨 Monaco Editor 통합**: VS Code 기반 에디터로 JSON Response Body에 대한 신속한 편집 및 문법 검증을 제공합니다.
+- **📜 실시간 Inspector Log**: MSW가 가로챈 모든 HTTP 요청/응답 트래픽 및 매칭된 Params 정보를 화면 하단 패널에서 실시간 모니터링합니다.
 - **💾 데이터 영속성 & 공유**: `localStorage` 자동 저장으로 작업 내역을 보존하며, `.json` 파일 내보내기/가져오기로 팀원 간 Mock 설정을 공유할 수 있습니다.
 
 ---
