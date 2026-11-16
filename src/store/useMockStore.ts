@@ -20,6 +20,8 @@ export interface NetworkLog {
   duration: number
   responseBody: string
   matchedParams?: Record<string, string>
+  matchedQuery?: Record<string, string> // 💡 [Phase 2] Query 파라미터 기록
+  requestBody?: string                  // 💡 [Phase 2] 요청 Body 기록
 }
 
 export interface Preset {
@@ -55,7 +57,17 @@ const DEFAULT_ENDPOINTS: MockEndpoint[] = [
     method: 'GET',
     path: '/api/users/:id',
     status: 200,
-    responseBody: JSON.stringify({ id: '{{params.id}}', name: 'John Doe', role: 'Developer' }, null, 2),
+    responseBody: JSON.stringify(
+      {
+        id: '{{params.id}}',
+        uuid: '{{$uuid}}',
+        name: 'John Doe',
+        role: '{{query.role}}',
+        createdAt: '{{$timestamp}}',
+      },
+      null,
+      2
+    ),
     delay: 0,
     enabled: true,
   },
@@ -64,7 +76,15 @@ const DEFAULT_ENDPOINTS: MockEndpoint[] = [
     method: 'POST',
     path: '/api/login',
     status: 200,
-    responseBody: JSON.stringify({ token: 'mock-jwt-token-xyz' }, null, 2),
+    responseBody: JSON.stringify(
+      {
+        token: 'mock-jwt-{{$uuid}}',
+        loginUser: '{{body.username}}',
+        sessionCode: '{{$randomInt}}',
+      },
+      null,
+      2
+    ),
     delay: 300,
     enabled: true,
   },
@@ -102,7 +122,15 @@ export const useMockStore = create<MockState>()(
           method: 'GET',
           path: `/api/resource/${Date.now().toString().slice(-4)}`,
           status: 200,
-          responseBody: JSON.stringify({ message: 'Success' }, null, 2),
+          responseBody: JSON.stringify(
+            {
+              id: '{{$uuid}}',
+              message: 'Success',
+              timestamp: '{{$timestamp}}',
+            },
+            null,
+            2
+          ),
           delay: 0,
           enabled: true,
         }
@@ -199,8 +227,9 @@ export const useMockStore = create<MockState>()(
                   status: 200,
                   responseBody: JSON.stringify(
                     {
+                      id: '{{$uuid}}',
                       message: `Swagger auto-generated response for ${upperMethod} ${formattedPath}`,
-                      timestamp: new Date().toISOString(),
+                      timestamp: '{{$timestamp}}',
                     },
                     null,
                     2

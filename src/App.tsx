@@ -14,8 +14,20 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Sparkles,
+  SlidersHorizontal,
 } from 'lucide-react'
 import { useMockStore } from './store/useMockStore'
+
+const TEMPLATE_TOKENS = [
+  { label: 'UUID', token: '{{$uuid}}' },
+  { label: 'Timestamp', token: '{{$timestamp}}' },
+  { label: 'Random Int', token: '{{$randomInt}}' },
+  { label: 'Random Bool', token: '{{$randomBoolean}}' },
+  { label: 'Path :id', token: '{{params.id}}' },
+  { label: 'Query 값', token: '{{query.role}}' },
+  { label: 'Body 값', token: '{{body.username}}' },
+]
 
 export default function App() {
   const {
@@ -43,14 +55,20 @@ export default function App() {
   const [copied, setCopied] = useState(false)
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null)
 
+  // 💡 [Phase 2] 인앱 테스트용 Query & Request Body 상태
+  const [showTestConfig, setShowTestConfig] = useState(false)
+  const [testQuery, setTestQuery] = useState('role=admin')
+  const [testBody, setTestBody] = useState('{"username": "frontend_master"}')
+
   const selectedEndpoint = endpoints.find((ep) => ep.id === selectedId)
 
-  // :id 같은 Path Variable을 테스트용 기본값 '1'로 변환
   const getTestablePath = (path: string) => {
-    return path.replace(/:([a-zA-Z0-9_]+)/g, '1')
+    const basePath = path.replace(/:([a-zA-Z0-9_]+)/g, '1')
+    const cleanQuery = testQuery.trim().replace(/^\?/, '')
+    return cleanQuery ? `${basePath}?${cleanQuery}` : basePath
   }
 
-  // 인앱 API 요청 발송 (Send 버튼)
+  // 💡 [Phase 2] Query와 Request Body를 포함하여 테스트 요청 전송
   const handleSendRequest = async () => {
     if (!selectedEndpoint) return
     if (!selectedEndpoint.enabled) {
@@ -60,10 +78,13 @@ export default function App() {
 
     setIsSending(true)
     const testUrl = getTestablePath(selectedEndpoint.path)
+    const hasBody = selectedEndpoint.method === 'POST' || selectedEndpoint.method === 'PUT'
 
     try {
       await fetch(testUrl, {
         method: selectedEndpoint.method,
+        headers: hasBody ? { 'Content-Type': 'application/json' } : undefined,
+        body: hasBody ? testBody : undefined,
       })
     } catch (error) {
       console.error('Test request failed:', error)
@@ -72,14 +93,24 @@ export default function App() {
     }
   }
 
-  // fetch 호출 코드 클립보드 복사
   const handleCopyFetch = () => {
     if (!selectedEndpoint) return
     const testUrl = getTestablePath(selectedEndpoint.path)
-    const fetchCode = `fetch('${testUrl}', { method: '${selectedEndpoint.method}' })\n  .then(res => res.json())\n  .then(console.log);`
+    const hasBody = selectedEndpoint.method === 'POST' || selectedEndpoint.method === 'PUT'
+    const options = hasBody
+      ? `{ method: '${selectedEndpoint.method}', headers: { 'Content-Type': 'application/json' }, body: '${testBody}' }`
+      : `{ method: '${selectedEndpoint.method}' }`
+
+    const fetchCode = `fetch('${testUrl}', ${options})\n  .then(res => res.json())\n  .then(console.log);`
     navigator.clipboard.writeText(fetchCode)
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
+  }
+
+  // 템플릿 매크로 토큰 클립보드 복사 및 안내
+  const handleInsertToken = (token: string) => {
+    navigator.clipboard.writeText(token)
+    alert(`클립보드에 ${token} 복사 완료! 에디터 원하는 위치에 붙여넣기(Ctrl+V) 하세요.`)
   }
 
   const handleExport = () => {
@@ -135,7 +166,7 @@ export default function App() {
       {/* Sidebar */}
       <aside className="w-80 border-r border-slate-800 flex flex-col bg-slate-950">
         <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-          <h1 className="text-xl font-bold tracking-wide text-indigo-400">MockLab v2.1</h1>
+          <h1 className="text-xl font-bold tracking-wide text-indigo-400">MockLab v2.2</h1>
           <div className="flex items-center gap-1">
             <button
               onClick={handleExport}
@@ -284,16 +315,27 @@ export default function App() {
                 onClick={handleSendRequest}
                 disabled={isSending}
                 className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold px-3 py-2 rounded transition shadow-sm cursor-pointer"
-                title="콘솔 없이 즉시 테스트 요청 보내기"
               >
                 <Play size={13} fill="currentColor" />
                 {isSending ? '요청 중...' : 'Send'}
               </button>
 
               <button
+                onClick={() => setShowTestConfig(!showTestConfig)}
+                className={`flex items-center gap-1 border text-xs px-2.5 py-2 rounded transition cursor-pointer ${
+                  showTestConfig
+                    ? 'bg-indigo-950 border-indigo-600 text-indigo-300'
+                    : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+                }`}
+                title="테스트 요청 시 함께 보낼 Query String 및 Request Body 설정"
+              >
+                <SlidersHorizontal size={13} />
+                <span>테스트 파라미터</span>
+              </button>
+
+              <button
                 onClick={handleCopyFetch}
                 className="flex items-center gap-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs px-2.5 py-2 rounded transition cursor-pointer"
-                title="fetch 호출 코드 복사"
               >
                 {copied ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
                 <span>{copied ? '복사됨' : 'fetch 복사'}</span>
@@ -340,6 +382,50 @@ export default function App() {
                 <Trash2 size={15} />
               </button>
             </header>
+
+            {/* 💡 [Phase 2] 테스트 요청용 Query & Request Body 입력 패널 */}
+            {showTestConfig && (
+              <div className="px-4 py-2.5 bg-slate-950 border-b border-slate-800 flex flex-wrap items-center gap-4 text-xs">
+                <div className="flex items-center gap-2 flex-1 min-w-[220px]">
+                  <span className="text-slate-400 font-semibold whitespace-nowrap">Query String (?):</span>
+                  <input
+                    type="text"
+                    value={testQuery}
+                    onChange={(e) => setTestQuery(e.target.value)}
+                    placeholder="예: role=admin&page=2"
+                    className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1 font-mono text-indigo-300 focus:outline-none"
+                  />
+                </div>
+                {(selectedEndpoint.method === 'POST' || selectedEndpoint.method === 'PUT') && (
+                  <div className="flex items-center gap-2 flex-[2] min-w-[280px]">
+                    <span className="text-slate-400 font-semibold whitespace-nowrap">Request Body (JSON):</span>
+                    <input
+                      type="text"
+                      value={testBody}
+                      onChange={(e) => setTestBody(e.target.value)}
+                      placeholder='예: {"username": "dev"}'
+                      className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1 font-mono text-emerald-300 focus:outline-none"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 💡 [Phase 2] 동적 템플릿 & Mini-Faker 칩 바 */}
+            <div className="px-4 py-2 bg-slate-900/90 border-b border-slate-800 flex items-center gap-2 overflow-x-auto">
+              <span className="flex items-center gap-1 text-[11px] font-semibold text-indigo-400 whitespace-nowrap mr-1">
+                <Sparkles size={12} /> 동적 템플릿 변수 (클릭해 복사):
+              </span>
+              {TEMPLATE_TOKENS.map((item) => (
+                <button
+                  key={item.token}
+                  onClick={() => handleInsertToken(item.token)}
+                  className="px-2 py-0.5 bg-slate-800 hover:bg-indigo-950 border border-slate-700 hover:border-indigo-600 rounded text-[11px] font-mono text-slate-300 hover:text-indigo-300 transition whitespace-nowrap cursor-pointer"
+                >
+                  {item.label} <span className="text-slate-500">{item.token}</span>
+                </button>
+              ))}
+            </div>
 
             <div className="flex-[3] p-2 relative">
               <Editor
@@ -389,7 +475,7 @@ export default function App() {
                           onClick={() => setExpandedLogId(isExpanded ? null : log.id)}
                           className="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-slate-800/50 transition"
                         >
-                          <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2.5 flex-wrap">
                             {isExpanded ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}
                             <span className="text-slate-500">{log.timestamp}</span>
                             <span className="font-bold text-indigo-400">{log.method}</span>
@@ -397,6 +483,11 @@ export default function App() {
                             {log.matchedParams && Object.keys(log.matchedParams).length > 0 && (
                               <span className="text-amber-400 text-[11px] bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-900/50">
                                 Params: {JSON.stringify(log.matchedParams)}
+                              </span>
+                            )}
+                            {log.matchedQuery && (
+                              <span className="text-sky-400 text-[11px] bg-sky-950/40 px-1.5 py-0.5 rounded border border-sky-900/50">
+                                Query: {JSON.stringify(log.matchedQuery)}
                               </span>
                             )}
                           </div>
@@ -415,13 +506,25 @@ export default function App() {
                         </div>
 
                         {isExpanded && (
-                          <div className="px-4 py-2.5 bg-slate-950 border-t border-slate-800/80 text-slate-300">
-                            <div className="text-[10px] text-slate-500 mb-1 uppercase tracking-wider font-semibold">
-                              Response Body
+                          <div className="px-4 py-2.5 bg-slate-950 border-t border-slate-800/80 text-slate-300 space-y-2">
+                            {log.requestBody && (
+                              <div>
+                                <div className="text-[10px] text-slate-500 mb-0.5 uppercase tracking-wider font-semibold">
+                                  Request Body
+                                </div>
+                                <pre className="text-xs text-amber-300 overflow-x-auto whitespace-pre-wrap">
+                                  {log.requestBody}
+                                </pre>
+                              </div>
+                            )}
+                            <div>
+                              <div className="text-[10px] text-slate-500 mb-0.5 uppercase tracking-wider font-semibold">
+                                Response Body
+                              </div>
+                              <pre className="text-xs text-emerald-300 overflow-x-auto whitespace-pre-wrap">
+                                {log.responseBody}
+                              </pre>
                             </div>
-                            <pre className="text-xs text-emerald-300 overflow-x-auto whitespace-pre-wrap">
-                              {log.responseBody}
-                            </pre>
                           </div>
                         )}
                       </div>
