@@ -1,90 +1,47 @@
-import React, { useRef, useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import Editor from '@monaco-editor/react'
 import {
   Plus,
   Trash2,
-  Download,
-  Upload,
-  Terminal,
   Clock,
-  Layers,
-  FileCode,
   Play,
-  Copy,
-  Check,
-  ChevronDown,
-  ChevronRight,
   Sparkles,
   SlidersHorizontal,
   ShieldAlert,
   Flame,
-  Search,
-  Share2,
   GitBranch,
   Database,
   Code2,
   RotateCcw,
-  X,
 } from 'lucide-react'
-import { useMockStore, HeaderItem, ResponseRule } from './store/useMockStore'
-
-const TEMPLATE_TOKENS = [
-  { label: 'UUID', token: '{{$uuid}}' },
-  { label: 'Timestamp', token: '{{$timestamp}}' },
-  { label: 'Random Int', token: '{{$randomInt}}' },
-  { label: 'Random Bool', token: '{{$randomBoolean}}' },
-  { label: 'Path :id', token: '{{params.id}}' },
-  { label: 'Query 값', token: '{{query.role}}' },
-  { label: 'Body 값', token: '{{body.username}}' },
-]
+import { useMockStore } from './store/useMockStore'
+import { HeaderItem, ResponseRule, TEMPLATE_TOKENS } from './types/mock'
+import { buildTestableUrl } from './utils/codeGenerator'
+import { Sidebar } from './components/Sidebar'
+import { TrafficInspector } from './components/TrafficInspector'
+import { CodeSnippetModal } from './components/CodeSnippetModal'
 
 export default function App() {
   const {
     endpoints,
     selectedId,
-    logs,
-    presets,
-    activePresetId,
     collections,
-    selectEndpoint,
-    addEndpoint,
     updateEndpoint,
     deleteEndpoint,
-    toggleEndpoint,
-    clearLogs,
     importEndpoints,
-    saveCurrentAsPreset,
-    loadPreset,
-    importSwaggerSpec,
     setCollectionData,
     resetCollections,
   } = useMockStore()
 
-  const jsonFileInputRef = useRef<HTMLInputElement>(null)
-  const swaggerFileInputRef = useRef<HTMLInputElement>(null)
-  const [newPresetName, setNewPresetName] = useState('')
   const [isSending, setIsSending] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const [shareCopied, setShareCopied] = useState(false)
-  const [expandedLogId, setExpandedLogId] = useState<string | null>(null)
-
-  // 사이드바 경로 검색 및 HTTP 메서드 필터 상태
-  const [searchTerm, setSearchTerm] = useState('')
-  const [methodFilter, setMethodFilter] = useState<'ALL' | 'GET' | 'POST' | 'PUT' | 'DELETE'>('ALL')
-
-  // 인앱 테스트 발송용 파라미터 상태
   const [showTestConfig, setShowTestConfig] = useState(false)
   const [testQuery, setTestQuery] = useState('role=admin')
   const [testBody, setTestBody] = useState('{"name": "박지훈", "role": "designer"}')
   const [includeTestAuth, setIncludeTestAuth] = useState(true)
   const [testToken, setTestToken] = useState('Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9')
 
-  // 메인 편집 영역 탭 전환 상태
   const [activeTab, setActiveTab] = useState<'body' | 'rules' | 'headers' | 'db'>('body')
-
-  // 코드 스니펫 모달 상태
   const [showSnippetModal, setShowSnippetModal] = useState(false)
-  const [snippetFormat, setSnippetFormat] = useState<'fetch' | 'axios' | 'curl' | 'rq'>('fetch')
 
   // URL 쿼리에 공유 데이터가 있을 경우 파싱하여 스토어에 반영
   useEffect(() => {
@@ -107,28 +64,6 @@ export default function App() {
 
   const selectedEndpoint = endpoints.find((ep) => ep.id === selectedId)
 
-  // 검색어 및 메서드 조건에 따른 엔드포인트 필터링
-  const filteredEndpoints = endpoints.filter((ep) => {
-    const matchesSearch = ep.path.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesMethod = methodFilter === 'ALL' || ep.method === methodFilter
-    return matchesSearch && matchesMethod
-  })
-
-  // 트래픽 메트릭 계산 (총 요청, 성공률, 평균 응답 시간)
-  const totalRequests = logs.length
-  const successCount = logs.filter((l) => l.status >= 200 && l.status < 400).length
-  const successRate = totalRequests > 0 ? Math.round((successCount / totalRequests) * 100) : 100
-  const avgDuration =
-    totalRequests > 0
-      ? Math.round(logs.reduce((acc, cur) => acc + cur.duration, 0) / totalRequests)
-      : 0
-
-  const getTestablePath = (path: string) => {
-    const basePath = path.replace(/:([a-zA-Z0-9_]+)/g, '1')
-    const cleanQuery = testQuery.trim().replace(/^\?/, '')
-    return cleanQuery ? `${basePath}?${cleanQuery}` : basePath
-  }
-
   const handleSendRequest = async () => {
     if (!selectedEndpoint) return
     if (!selectedEndpoint.enabled) {
@@ -137,7 +72,7 @@ export default function App() {
     }
 
     setIsSending(true)
-    const testUrl = getTestablePath(selectedEndpoint.path)
+    const testUrl = buildTestableUrl(selectedEndpoint.path, testQuery)
     const hasBody = selectedEndpoint.method === 'POST' || selectedEndpoint.method === 'PUT'
 
     const reqHeaders: Record<string, string> = {}
@@ -159,79 +94,11 @@ export default function App() {
     }
   }
 
-  // 선택한 포맷에 맞는 클라이언트 호출 코드 생성
-  const generateCodeSnippet = (format: 'fetch' | 'axios' | 'curl' | 'rq') => {
-    if (!selectedEndpoint) return ''
-    const testUrl = getTestablePath(selectedEndpoint.path)
-    const hasBody = selectedEndpoint.method === 'POST' || selectedEndpoint.method === 'PUT'
-    const needAuth = selectedEndpoint.requireAuth || includeTestAuth
-
-    const headersObj: Record<string, string> = {}
-    if (hasBody) headersObj['Content-Type'] = 'application/json'
-    if (needAuth && testToken.trim()) headersObj['Authorization'] = testToken.trim()
-
-    if (format === 'fetch') {
-      const optionsParts = [`  method: '${selectedEndpoint.method}'`]
-      if (Object.keys(headersObj).length > 0) {
-        optionsParts.push(`  headers: ${JSON.stringify(headersObj, null, 4).replace(/\n/g, '\n  ')}`)
-      }
-      if (hasBody) optionsParts.push(`  body: JSON.stringify(${testBody})`)
-      return `fetch('${testUrl}', {\n${optionsParts.join(',\n')}\n})\n  .then((res) => res.json())\n  .then((data) => console.log(data));`
-    }
-
-    if (format === 'axios') {
-      const configStr =
-        Object.keys(headersObj).length > 0 ? `, {\n  headers: ${JSON.stringify(headersObj)}\n}` : ''
-      if (hasBody) {
-        return `import axios from 'axios';\n\nconst response = await axios.${selectedEndpoint.method.toLowerCase()}('${testUrl}', ${testBody}${configStr});\nconsole.log(response.data);`
-      }
-      return `import axios from 'axios';\n\nconst response = await axios.${selectedEndpoint.method.toLowerCase()}('${testUrl}'${configStr});\nconsole.log(response.data);`
-    }
-
-    if (format === 'curl') {
-      const headerFlags = Object.entries(headersObj)
-        .map(([k, v]) => `-H "${k}: ${v}"`)
-        .join(' \\\n  ')
-      const bodyFlag = hasBody ? ` \\\n  -d '${testBody}'` : ''
-      return `curl -X ${selectedEndpoint.method} "${window.location.origin}${testUrl}"${
-        headerFlags ? ` \\\n  ${headerFlags}` : ''
-      }${bodyFlag}`
-    }
-
-    // TanStack Query (React Query) 스니펫
-    if (selectedEndpoint.method === 'GET') {
-      return `import { useQuery } from '@tanstack/react-query';\n\nexport function useMockResource() {\n  return useQuery({\n    queryKey: ['${selectedEndpoint.path}'],\n    queryFn: async () => {\n      const res = await fetch('${testUrl}');\n      if (!res.ok) throw new Error('Network error');\n      return res.json();\n    },\n  });\n}`
-    }
-    return `import { useMutation } from '@tanstack/react-query';\n\nexport function useMockMutation() {\n  return useMutation({\n    mutationFn: async (payload: Record<string, unknown>) => {\n      const res = await fetch('${testUrl}', {\n        method: '${selectedEndpoint.method}',\n        headers: { 'Content-Type': 'application/json' },\n        body: JSON.stringify(payload),\n      });\n      if (!res.ok) throw new Error('Request failed');\n      return res.json();\n    },\n  });\n}`
-  }
-
-  const handleCopySnippet = () => {
-    const code = generateCodeSnippet(snippetFormat)
-    navigator.clipboard.writeText(code)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
-  }
-
-  // 전체 엔드포인트 설정을 Base64 인코딩하여 공유 URL 생성
-  const handleShareUrl = () => {
-    try {
-      const jsonStr = JSON.stringify(endpoints)
-      const encoded = btoa(unescape(encodeURIComponent(jsonStr)))
-      const shareUrl = `${window.location.origin}${window.location.pathname}?share=${encoded}`
-      navigator.clipboard.writeText(shareUrl)
-      setShareCopied(true)
-      setTimeout(() => setShareCopied(false), 2000)
-    } catch {
-      alert('공유 링크 생성 중 오류가 발생했습니다.')
-    }
-  }
-
   const handleInsertToken = (token: string) => {
     navigator.clipboard.writeText(token)
     alert(`클립보드에 ${token} 복사 완료. 에디터 원하는 위치에 붙여넣기(Ctrl+V) 하세요.`)
   }
 
-  // 응답 헤더 추가/수정/삭제 핸들러
   const handleAddHeader = () => {
     if (!selectedEndpoint) return
     const nextHeaders: HeaderItem[] = [
@@ -255,7 +122,6 @@ export default function App() {
     updateEndpoint(selectedEndpoint.id, { headers: nextHeaders })
   }
 
-  // 조건부 응답 규칙 추가/수정/삭제 핸들러
   const handleAddRule = () => {
     if (!selectedEndpoint) return
     const newRule: ResponseRule = {
@@ -291,243 +157,13 @@ export default function App() {
     updateEndpoint(selectedEndpoint.id, { rules: nextRules, activeRuleId: nextActiveId })
   }
 
-  const handleExport = () => {
-    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(endpoints, null, 2))
-    const downloadAnchor = document.createElement('a')
-    downloadAnchor.setAttribute('href', dataStr)
-    downloadAnchor.setAttribute('download', `mocklab-export-${Date.now()}.json`)
-    document.body.appendChild(downloadAnchor)
-    downloadAnchor.click()
-    downloadAnchor.remove()
-  }
-
-  const handleImportJson = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const fileReader = new FileReader()
-    if (e.target.files && e.target.files[0]) {
-      fileReader.readAsText(e.target.files[0], 'UTF-8')
-      fileReader.onload = (event) => {
-        try {
-          const parsed = JSON.parse(event.target?.result as string)
-          if (Array.isArray(parsed)) {
-            importEndpoints(parsed)
-          }
-        } catch {
-          alert('유효하지 않은 JSON 파일입니다.')
-        }
-      }
-    }
-  }
-
-  const handleImportSwagger = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const fileReader = new FileReader()
-    if (e.target.files && e.target.files[0]) {
-      fileReader.readAsText(e.target.files[0], 'UTF-8')
-      fileReader.onload = (event) => {
-        try {
-          const parsed = JSON.parse(event.target?.result as string)
-          importSwaggerSpec(parsed)
-        } catch {
-          alert('유효하지 않은 Swagger/OpenAPI JSON 파일입니다.')
-        }
-      }
-    }
-  }
-
-  const handleCreatePreset = () => {
-    if (!newPresetName.trim()) return
-    saveCurrentAsPreset(newPresetName.trim())
-    setNewPresetName('')
-  }
-
   const currentColName = (selectedEndpoint?.collectionName || 'users').trim()
   const currentColData = collections[currentColName] || []
 
   return (
     <div className="flex h-screen w-screen bg-slate-900 text-slate-100 overflow-hidden font-sans">
-      {/* 좌측 사이드바 */}
-      <aside className="w-80 border-r border-slate-800 flex flex-col bg-slate-950">
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-          <h1 className="text-xl font-bold tracking-wide text-indigo-400">MockLab v2.5</h1>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={handleShareUrl}
-              title="URL 링크로 전체 Mock 설정 공유"
-              className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded text-indigo-300 transition cursor-pointer"
-            >
-              {shareCopied ? <Check size={14} className="text-emerald-400" /> : <Share2 size={14} />}
-            </button>
-            <button
-              onClick={handleExport}
-              title="설정 내보내기 (JSON)"
-              className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 transition cursor-pointer"
-            >
-              <Download size={14} />
-            </button>
-            <button
-              onClick={() => jsonFileInputRef.current?.click()}
-              title="설정 가져오기 (JSON)"
-              className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 transition cursor-pointer"
-            >
-              <Upload size={14} />
-            </button>
-            <button
-              onClick={() => swaggerFileInputRef.current?.click()}
-              title="Swagger/OpenAPI 자동 파싱"
-              className="p-1.5 bg-indigo-950 border border-indigo-700 hover:bg-indigo-900 rounded text-indigo-300 transition cursor-pointer"
-            >
-              <FileCode size={14} />
-            </button>
-            <input type="file" ref={jsonFileInputRef} onChange={handleImportJson} accept=".json" className="hidden" />
-            <input type="file" ref={swaggerFileInputRef} onChange={handleImportSwagger} accept=".json" className="hidden" />
+      <Sidebar />
 
-            <button
-              onClick={addEndpoint}
-              className="flex items-center gap-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-2 py-1.5 rounded transition font-medium ml-1 cursor-pointer"
-            >
-              <Plus size={14} /> 추가
-            </button>
-          </div>
-        </div>
-
-        {/* 시나리오 프리셋 영역 */}
-        <div className="p-3 border-b border-slate-800/80 bg-slate-900/60 flex flex-col gap-2">
-          <div className="flex items-center justify-between text-xs font-semibold text-slate-400">
-            <span className="flex items-center gap-1"><Layers size={13} /> 시나리오 프리셋</span>
-          </div>
-          <select
-            value={activePresetId || ''}
-            onChange={(e) => loadPreset(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs text-indigo-300 font-medium focus:outline-none"
-          >
-            {presets.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-          <div className="flex gap-1 mt-1">
-            <input
-              type="text"
-              placeholder="새 프리셋 이름..."
-              value={newPresetName}
-              onChange={(e) => setNewPresetName(e.target.value)}
-              className="flex-1 bg-slate-950 border border-slate-800 rounded px-2 py-1 text-[11px] focus:outline-none"
-            />
-            <button
-              onClick={handleCreatePreset}
-              className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] px-2 rounded cursor-pointer"
-            >
-              저장
-            </button>
-          </div>
-        </div>
-
-        {/* 경로 검색 및 메서드 필터 영역 */}
-        <div className="p-2.5 border-b border-slate-800/80 bg-slate-950 space-y-2">
-          <div className="relative">
-            <Search size={13} className="absolute left-2.5 top-2 text-slate-500" />
-            <input
-              type="text"
-              placeholder="API 경로 검색 (예: /users)..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-800 rounded pl-8 pr-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
-            />
-          </div>
-          <div className="flex items-center gap-1">
-            {(['ALL', 'GET', 'POST', 'PUT', 'DELETE'] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => setMethodFilter(m)}
-                className={`flex-1 py-1 rounded text-[10px] font-bold transition cursor-pointer ${
-                  methodFilter === m
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-slate-900 text-slate-400 hover:bg-slate-800'
-                }`}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* 엔드포인트 목록 */}
-        <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
-          {filteredEndpoints.length === 0 ? (
-            <div className="p-4 text-center text-xs text-slate-600">
-              일치하는 엔드포인트가 없습니다.
-            </div>
-          ) : (
-            filteredEndpoints.map((ep) => {
-              const isSelected = ep.id === selectedId
-              const methodColors: Record<string, string> = {
-                GET: 'text-green-400 bg-green-950/50 border-green-800',
-                POST: 'text-blue-400 bg-blue-950/50 border-blue-800',
-                PUT: 'text-amber-400 bg-amber-950/50 border-amber-800',
-                DELETE: 'text-red-400 bg-red-950/50 border-red-800',
-              }
-
-              return (
-                <div
-                  key={ep.id}
-                  onClick={() => selectEndpoint(ep.id)}
-                  className={`p-3 rounded-lg border cursor-pointer transition flex items-center justify-between ${
-                    isSelected
-                      ? 'border-indigo-500 bg-slate-800/80'
-                      : 'border-slate-800/60 bg-slate-900/40 hover:bg-slate-800/40'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 overflow-hidden">
-                    <span
-                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
-                        methodColors[ep.method]
-                      }`}
-                    >
-                      {ep.method}
-                    </span>
-                    <span className="text-sm font-mono truncate text-slate-200">
-                      {ep.path}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    {ep.useStatefulDb && (
-                      <span title={`Stateful DB 연동 (${ep.collectionName || 'users'})`} className="text-emerald-400">
-                        <Database size={13} />
-                      </span>
-                    )}
-                    {(ep.rules || []).length > 0 && (
-                      <span title={`다중 응답 규칙 ${(ep.rules || []).length}개`} className="text-sky-400">
-                        <GitBranch size={13} />
-                      </span>
-                    )}
-                    {ep.requireAuth && (
-                      <span title="Auth 토큰 필수" className="text-amber-400">
-                        <ShieldAlert size={13} />
-                      </span>
-                    )}
-                    {(ep.failureRate || 0) > 0 && (
-                      <span title={`Chaos 장애율 ${ep.failureRate}%`} className="text-rose-400">
-                        <Flame size={13} />
-                      </span>
-                    )}
-                    <input
-                      type="checkbox"
-                      checked={ep.enabled}
-                      onChange={(e) => {
-                        e.stopPropagation()
-                        toggleEndpoint(ep.id)
-                      }}
-                      className="accent-indigo-500 cursor-pointer ml-1"
-                    />
-                  </div>
-                </div>
-              )
-            })
-          )}
-        </div>
-      </aside>
-
-      {/* 우측 메인 편집 및 로그 영역 */}
       <main className="flex-1 flex flex-col bg-slate-900 overflow-hidden">
         {selectedEndpoint ? (
           <>
@@ -627,7 +263,6 @@ export default function App() {
               </button>
             </header>
 
-            {/* 예외 시뮬레이션 설정 및 탭 전환 바 */}
             <div className="px-4 py-2 bg-slate-950/80 border-b border-slate-800 flex flex-wrap items-center justify-between gap-4 text-xs">
               <div className="flex items-center gap-5 flex-wrap">
                 <label className="flex items-center gap-1.5 cursor-pointer select-none">
@@ -680,7 +315,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 편집기 탭 전환 버튼 */}
               <div className="flex items-center bg-slate-900 p-0.5 rounded-lg border border-slate-800">
                 <button
                   onClick={() => setActiveTab('body')}
@@ -727,7 +361,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* 인앱 테스트 파라미터 입력 영역 */}
             {showTestConfig && (
               <div className="px-4 py-2.5 bg-slate-900/95 border-b border-slate-800 flex flex-wrap items-center gap-4 text-xs">
                 <div className="flex items-center gap-2 flex-1 min-w-[200px]">
@@ -774,7 +407,6 @@ export default function App() {
               </div>
             )}
 
-            {/* 탭 1: 기본 Response Body 편집 탭 */}
             {activeTab === 'body' && (
               <>
                 <div className="px-4 py-2 bg-slate-900/90 border-b border-slate-800 flex items-center gap-2 overflow-x-auto">
@@ -815,7 +447,6 @@ export default function App() {
               </>
             )}
 
-            {/* 탭 2: 다중 조건부 응답 규칙(Rules) 편집 탭 */}
             {activeTab === 'rules' && (
               <div className="flex-[3] p-4 overflow-y-auto bg-slate-900 space-y-4">
                 <div className="flex items-center justify-between">
@@ -950,7 +581,6 @@ export default function App() {
               </div>
             )}
 
-            {/* 탭 3: 커스텀 Response Headers 편집 탭 */}
             {activeTab === 'headers' && (
               <div className="flex-[3] p-4 overflow-y-auto bg-slate-900 space-y-3">
                 <div className="flex items-center justify-between">
@@ -1003,7 +633,6 @@ export default function App() {
               </div>
             )}
 
-            {/* 탭 4: 인메모리 가상 CRUD DB 설정 및 컬렉션 데이터 편집 탭 */}
             {activeTab === 'db' && (
               <div className="flex-[3] p-4 overflow-y-auto bg-slate-900 space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1066,136 +695,7 @@ export default function App() {
               </div>
             )}
 
-            {/* 하단 실시간 트래픽 로그 및 메트릭 패널 */}
-            <div className="flex-[2] border-t border-slate-800 bg-slate-950 flex flex-col overflow-hidden">
-              <div className="px-4 py-2 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 bg-slate-900/60">
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2 text-xs font-semibold text-slate-300">
-                    <Terminal size={14} className="text-indigo-400" />
-                    실시간 트래픽 로그
-                  </div>
-                  {/* 트래픽 요약 지표 */}
-                  <div className="flex items-center gap-3 text-[11px] font-mono border-l border-slate-800 pl-3">
-                    <span className="text-slate-400">
-                      총 요청: <b className="text-slate-200">{totalRequests}</b>
-                    </span>
-                    <span className="text-slate-400">
-                      성공률: <b className="text-emerald-400">{successRate}%</b>
-                    </span>
-                    <span className="text-slate-400">
-                      평균 지연: <b className="text-indigo-300">{avgDuration}ms</b>
-                    </span>
-                  </div>
-                </div>
-                <button onClick={clearLogs} className="text-[11px] text-slate-400 hover:text-white transition cursor-pointer">
-                  로그 비우기
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto p-2 font-mono text-xs space-y-1">
-                {logs.length === 0 ? (
-                  <div className="p-2 text-slate-600 italic">
-                    가로챈 요청이 없습니다. 상단의 초록색 [Send] 버튼을 눌러 테스트해 보세요.
-                  </div>
-                ) : (
-                  logs.map((log) => {
-                    const isExpanded = expandedLogId === log.id
-                    const isError = log.status >= 400
-
-                    return (
-                      <div key={log.id} className="border border-slate-800/80 rounded bg-slate-900/40 overflow-hidden">
-                        <div
-                          onClick={() => setExpandedLogId(isExpanded ? null : log.id)}
-                          className="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-slate-800/50 transition"
-                        >
-                          <div className="flex items-center gap-2.5 flex-wrap">
-                            {isExpanded ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}
-                            <span className="text-slate-500">{log.timestamp}</span>
-                            <span className="font-bold text-indigo-400">{log.method}</span>
-                            <span className="text-slate-200">{log.path}</span>
-
-                            {log.statefulAction && (
-                              <span className="text-emerald-300 text-[10px] bg-emerald-950/70 px-1.5 py-0.5 rounded border border-emerald-700 font-semibold">
-                                {log.statefulAction}
-                              </span>
-                            )}
-                            {log.matchedRuleName && (
-                              <span className="text-sky-300 text-[10px] bg-sky-950/70 px-1.5 py-0.5 rounded border border-sky-700 font-semibold">
-                                규칙: {log.matchedRuleName}
-                              </span>
-                            )}
-                            {log.errorReason === 'AUTH_GUARD' && (
-                              <span className="text-amber-300 text-[10px] bg-amber-950/70 px-1.5 py-0.5 rounded border border-amber-700 font-semibold">
-                                Auth Guard 차단
-                              </span>
-                            )}
-                            {log.errorReason === 'CHAOS_MODE' && (
-                              <span className="text-rose-300 text-[10px] bg-rose-950/70 px-1.5 py-0.5 rounded border border-rose-700 font-semibold">
-                                Chaos 장애 발생
-                              </span>
-                            )}
-                            {log.matchedParams && Object.keys(log.matchedParams).length > 0 && (
-                              <span className="text-amber-400 text-[11px] bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-900/50">
-                                Params: {JSON.stringify(log.matchedParams)}
-                              </span>
-                            )}
-                            {log.matchedQuery && (
-                              <span className="text-sky-400 text-[11px] bg-sky-950/40 px-1.5 py-0.5 rounded border border-sky-900/50">
-                                Query: {JSON.stringify(log.matchedQuery)}
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-slate-500 text-[11px]">{log.duration}ms</span>
-                            <span
-                              className={`px-1.5 py-0.5 rounded text-[11px] border ${
-                                isError
-                                  ? 'bg-red-950 text-red-400 border-red-800'
-                                  : 'bg-emerald-950 text-emerald-400 border-emerald-800'
-                              }`}
-                            >
-                              {log.status}
-                            </span>
-                          </div>
-                        </div>
-
-                        {isExpanded && (
-                          <div className="px-4 py-2.5 bg-slate-950 border-t border-slate-800/80 text-slate-300 space-y-2.5">
-                            {log.responseHeaders && Object.keys(log.responseHeaders).length > 0 && (
-                              <div>
-                                <div className="text-[10px] text-slate-500 mb-0.5 uppercase tracking-wider font-semibold">
-                                  Response Headers
-                                </div>
-                                <pre className="text-xs text-indigo-300 overflow-x-auto whitespace-pre-wrap">
-                                  {JSON.stringify(log.responseHeaders, null, 2)}
-                                </pre>
-                              </div>
-                            )}
-                            {log.requestBody && (
-                              <div>
-                                <div className="text-[10px] text-slate-500 mb-0.5 uppercase tracking-wider font-semibold">
-                                  Request Body
-                                </div>
-                                <pre className="text-xs text-amber-300 overflow-x-auto whitespace-pre-wrap">
-                                  {log.requestBody}
-                                </pre>
-                              </div>
-                            )}
-                            <div>
-                              <div className="text-[10px] text-slate-500 mb-0.5 uppercase tracking-wider font-semibold">
-                                Response Body
-                              </div>
-                              <pre className="text-xs text-emerald-300 overflow-x-auto whitespace-pre-wrap">
-                                {log.responseBody}
-                              </pre>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })
-                )}
-              </div>
-            </div>
+            <TrafficInspector />
           </>
         ) : (
           <div className="flex-1 flex items-center justify-center text-slate-500">
@@ -1204,63 +704,15 @@ export default function App() {
         )}
       </main>
 
-      {/* 다중 포맷 코드 스니펫 모달 */}
       {showSnippetModal && selectedEndpoint && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-2xl overflow-hidden shadow-2xl">
-            <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between bg-slate-950">
-              <div className="flex items-center gap-2 text-sm font-bold text-slate-200">
-                <Code2 size={16} className="text-indigo-400" />
-                클라이언트 호출 코드 생성기 ({selectedEndpoint.method} {selectedEndpoint.path})
-              </div>
-              <button
-                onClick={() => setShowSnippetModal(false)}
-                className="text-slate-400 hover:text-white cursor-pointer"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
-                  {(
-                    [
-                      { id: 'fetch', label: 'Fetch API' },
-                      { id: 'axios', label: 'Axios' },
-                      { id: 'curl', label: 'cURL' },
-                      { id: 'rq', label: 'TanStack Query' },
-                    ] as const
-                  ).map((tab) => (
-                    <button
-                      key={tab.id}
-                      onClick={() => setSnippetFormat(tab.id)}
-                      className={`px-3 py-1 rounded text-xs font-medium transition cursor-pointer ${
-                        snippetFormat === tab.id
-                          ? 'bg-indigo-600 text-white'
-                          : 'text-slate-400 hover:text-slate-200'
-                      }`}
-                    >
-                      {tab.label}
-                    </button>
-                  ))}
-                </div>
-
-                <button
-                  onClick={handleCopySnippet}
-                  className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-1.5 rounded transition cursor-pointer"
-                >
-                  {copied ? <Check size={13} /> : <Copy size={13} />}
-                  {copied ? '복사 완료' : '코드 복사'}
-                </button>
-              </div>
-
-              <pre className="p-4 bg-slate-950 border border-slate-800 rounded-lg font-mono text-xs text-emerald-300 overflow-x-auto whitespace-pre-wrap leading-relaxed">
-                {generateCodeSnippet(snippetFormat)}
-              </pre>
-            </div>
-          </div>
-        </div>
+        <CodeSnippetModal
+          endpoint={selectedEndpoint}
+          testQuery={testQuery}
+          testBody={testBody}
+          includeTestAuth={includeTestAuth}
+          testToken={testToken}
+          onClose={() => setShowSnippetModal(false)}
+        />
       )}
     </div>
   )

@@ -1,63 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-
-export interface HeaderItem {
-  id: string
-  key: string
-  value: string
-}
-
-// 조건부 다중 응답 규칙 타입
-export interface ResponseRule {
-  id: string
-  name: string
-  status: number
-  responseBody: string
-  conditionType?: 'none' | 'query' | 'body'
-  conditionKey?: string
-  conditionValue?: string
-}
-
-export interface MockEndpoint {
-  id: string
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE'
-  path: string
-  status: number
-  responseBody: string
-  delay: number
-  enabled: boolean
-  requireAuth?: boolean
-  failureRate?: number
-  headers?: HeaderItem[]
-  rules?: ResponseRule[]
-  activeRuleId?: string | null
-  // 가상 CRUD DB 연동 설정
-  useStatefulDb?: boolean
-  collectionName?: string
-}
-
-export interface NetworkLog {
-  id: string
-  timestamp: string
-  method: string
-  path: string
-  status: number
-  duration: number
-  responseBody: string
-  matchedParams?: Record<string, string>
-  matchedQuery?: Record<string, string>
-  requestBody?: string
-  responseHeaders?: Record<string, string>
-  errorReason?: 'AUTH_GUARD' | 'CHAOS_MODE'
-  matchedRuleName?: string
-  statefulAction?: string // 가상 DB 처리 내역 표시 (예: "users 컬렉션 조회")
-}
-
-export interface Preset {
-  id: string
-  name: string
-  endpoints: MockEndpoint[]
-}
+import { MockEndpoint, NetworkLog, Preset } from '../types/mock'
+import { parseSwaggerSpec } from '../utils/openapiParser'
 
 interface MockState {
   endpoints: MockEndpoint[]
@@ -79,13 +23,10 @@ interface MockState {
   loadPreset: (presetId: string) => void
   deletePreset: (presetId: string) => void
   importSwaggerSpec: (swaggerJson: any) => void
-
-  // 가상 DB 컬렉션 제어 액션
   setCollectionData: (name: string, data: Record<string, any>[]) => void
   resetCollections: () => void
 }
 
-// 초기 가상 DB 샘플 데이터
 const INITIAL_COLLECTIONS: Record<string, Record<string, any>[]> = {
   users: [
     { id: '1', name: '김민수', role: 'admin', email: 'minsu@mocklab.dev' },
@@ -293,43 +234,7 @@ export const useMockStore = create<MockState>()(
 
       importSwaggerSpec: (swaggerJson) => {
         try {
-          const importedEndpoints: MockEndpoint[] = []
-          const paths = swaggerJson.paths || {}
-
-          Object.keys(paths).forEach((pathKey) => {
-            const methods = paths[pathKey]
-            Object.keys(methods).forEach((methodKey) => {
-              const upperMethod = methodKey.toUpperCase() as MockEndpoint['method']
-              if (['GET', 'POST', 'PUT', 'DELETE'].includes(upperMethod)) {
-                const formattedPath = pathKey.replace(/\{([^}]+)\}/g, ':$1')
-                importedEndpoints.push({
-                  id: `${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-                  method: upperMethod,
-                  path: formattedPath,
-                  status: 200,
-                  responseBody: JSON.stringify(
-                    {
-                      id: '{{$uuid}}',
-                      message: `Swagger auto-generated response for ${upperMethod} ${formattedPath}`,
-                      timestamp: '{{$timestamp}}',
-                    },
-                    null,
-                    2
-                  ),
-                  delay: 0,
-                  enabled: true,
-                  requireAuth: false,
-                  failureRate: 0,
-                  headers: [],
-                  activeRuleId: null,
-                  rules: [],
-                  useStatefulDb: false,
-                  collectionName: 'users',
-                })
-              }
-            })
-          })
-
+          const importedEndpoints = parseSwaggerSpec(swaggerJson)
           if (importedEndpoints.length > 0) {
             set({
               endpoints: importedEndpoints,
