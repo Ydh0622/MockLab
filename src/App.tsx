@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react'
+import React, { useRef, useState, useEffect } from 'react'
 import Editor from '@monaco-editor/react'
 import {
   Plus,
@@ -18,8 +18,11 @@ import {
   SlidersHorizontal,
   ShieldAlert,
   Flame,
+  Search,
+  Share2,
+  GitBranch,
 } from 'lucide-react'
-import { useMockStore, HeaderItem } from './store/useMockStore'
+import { useMockStore, HeaderItem, ResponseRule } from './store/useMockStore'
 
 const TEMPLATE_TOKENS = [
   { label: 'UUID', token: '{{$uuid}}' },
@@ -55,19 +58,50 @@ export default function App() {
   const [newPresetName, setNewPresetName] = useState('')
   const [isSending, setIsSending] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [shareCopied, setShareCopied] = useState(false)
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null)
 
-  // 인앱 테스트용 상태 (Query, Body, Auth Token)
+  // 사이드바 경로 검색 및 HTTP 메서드 필터 상태
+  const [searchTerm, setSearchTerm] = useState('')
+  const [methodFilter, setMethodFilter] = useState<'ALL' | 'GET' | 'POST' | 'PUT' | 'DELETE'>('ALL')
+
+  // 인앱 테스트 발송용 파라미터 상태
   const [showTestConfig, setShowTestConfig] = useState(false)
   const [testQuery, setTestQuery] = useState('role=admin')
   const [testBody, setTestBody] = useState('{"username": "frontend_master"}')
   const [includeTestAuth, setIncludeTestAuth] = useState(true)
   const [testToken, setTestToken] = useState('Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9')
 
-  // 💡 [Phase 3] 에디터 탭 전환 ('body' | 'headers')
-  const [activeTab, setActiveTab] = useState<'body' | 'headers'>('body')
+  // 메인 편집 영역 탭 전환 상태
+  const [activeTab, setActiveTab] = useState<'body' | 'rules' | 'headers'>('body')
+
+  // URL 쿼리에 공유 데이터(?share=...)가 있을 경우 파싱하여 스토어에 반영
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const sharedData = params.get('share')
+    if (sharedData) {
+      try {
+        const jsonStr = decodeURIComponent(escape(atob(sharedData)))
+        const parsed = JSON.parse(jsonStr)
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          importEndpoints(parsed)
+          window.history.replaceState({}, document.title, window.location.pathname)
+          alert(`공유 링크로부터 ${parsed.length}개의 엔드포인트를 불러왔습니다.`)
+        }
+      } catch {
+        console.error('Failed to parse shared URL data')
+      }
+    }
+  }, [importEndpoints])
 
   const selectedEndpoint = endpoints.find((ep) => ep.id === selectedId)
+
+  // 검색어 및 메서드 조건에 따른 엔드포인트 필터링
+  const filteredEndpoints = endpoints.filter((ep) => {
+    const matchesSearch = ep.path.toLowerCase().includes(searchTerm.toLowerCase())
+    const matchesMethod = methodFilter === 'ALL' || ep.method === methodFilter
+    return matchesSearch && matchesMethod
+  })
 
   const getTestablePath = (path: string) => {
     const basePath = path.replace(/:([a-zA-Z0-9_]+)/g, '1')
@@ -75,11 +109,10 @@ export default function App() {
     return cleanQuery ? `${basePath}?${cleanQuery}` : basePath
   }
 
-  // 💡 [Phase 3] Authorization 헤더를 포함한 테스트 요청 발송
   const handleSendRequest = async () => {
     if (!selectedEndpoint) return
     if (!selectedEndpoint.enabled) {
-      alert('비활성화된 엔드포인트입니다. 좌측 체크박스를 먼저 켜주세요!')
+      alert('비활성화된 엔드포인트입니다. 좌측 체크박스를 먼저 켜주세요.')
       return
     }
 
@@ -128,12 +161,26 @@ export default function App() {
     setTimeout(() => setCopied(false), 1500)
   }
 
-  const handleInsertToken = (token: string) => {
-    navigator.clipboard.writeText(token)
-    alert(`클립보드에 ${token} 복사 완료! 에디터 원하는 위치에 붙여넣기(Ctrl+V) 하세요.`)
+  // 전체 엔드포인트 설정을 Base64 인코딩하여 공유 URL 생성
+  const handleShareUrl = () => {
+    try {
+      const jsonStr = JSON.stringify(endpoints)
+      const encoded = btoa(unescape(encodeURIComponent(jsonStr)))
+      const shareUrl = `${window.location.origin}${window.location.pathname}?share=${encoded}`
+      navigator.clipboard.writeText(shareUrl)
+      setShareCopied(true)
+      setTimeout(() => setShareCopied(false), 2000)
+    } catch {
+      alert('공유 링크 생성 중 오류가 발생했습니다.')
+    }
   }
 
-  // 💡 [Phase 3] 커스텀 헤더 제어 함수들
+  const handleInsertToken = (token: string) => {
+    navigator.clipboard.writeText(token)
+    alert(`클립보드에 ${token} 복사 완료. 에디터 원하는 위치에 붙여넣기(Ctrl+V) 하세요.`)
+  }
+
+  // 응답 헤더 추가/수정/삭제 핸들러
   const handleAddHeader = () => {
     if (!selectedEndpoint) return
     const nextHeaders: HeaderItem[] = [
@@ -155,6 +202,42 @@ export default function App() {
     if (!selectedEndpoint) return
     const nextHeaders = (selectedEndpoint.headers || []).filter((h) => h.id !== headerId)
     updateEndpoint(selectedEndpoint.id, { headers: nextHeaders })
+  }
+
+  // 조건부 응답 규칙 추가/수정/삭제 핸들러
+  const handleAddRule = () => {
+    if (!selectedEndpoint) return
+    const newRule: ResponseRule = {
+      id: `rule-${Date.now()}`,
+      name: `조건부 응답 #${(selectedEndpoint.rules || []).length + 1}`,
+      status: 400,
+      responseBody: JSON.stringify(
+        { error: 'Bad Request', message: '조건부 규칙에 의해 반환된 응답입니다.' },
+        null,
+        2
+      ),
+      conditionType: 'query',
+      conditionKey: 'role',
+      conditionValue: 'guest',
+    }
+    updateEndpoint(selectedEndpoint.id, {
+      rules: [...(selectedEndpoint.rules || []), newRule],
+    })
+  }
+
+  const handleUpdateRule = (ruleId: string, updated: Partial<ResponseRule>) => {
+    if (!selectedEndpoint) return
+    const nextRules = (selectedEndpoint.rules || []).map((r) =>
+      r.id === ruleId ? { ...r, ...updated } : r
+    )
+    updateEndpoint(selectedEndpoint.id, { rules: nextRules })
+  }
+
+  const handleRemoveRule = (ruleId: string) => {
+    if (!selectedEndpoint) return
+    const nextRules = (selectedEndpoint.rules || []).filter((r) => r.id !== ruleId)
+    const nextActiveId = selectedEndpoint.activeRuleId === ruleId ? null : selectedEndpoint.activeRuleId
+    updateEndpoint(selectedEndpoint.id, { rules: nextRules, activeRuleId: nextActiveId })
   }
 
   const handleExport = () => {
@@ -207,29 +290,36 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-screen bg-slate-900 text-slate-100 overflow-hidden font-sans">
-      {/* Sidebar */}
+      {/* 좌측 사이드바 */}
       <aside className="w-80 border-r border-slate-800 flex flex-col bg-slate-950">
         <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-          <h1 className="text-xl font-bold tracking-wide text-indigo-400">MockLab v2.3</h1>
+          <h1 className="text-xl font-bold tracking-wide text-indigo-400">MockLab v2.4</h1>
           <div className="flex items-center gap-1">
             <button
+              onClick={handleShareUrl}
+              title="URL 링크로 전체 Mock 설정 공유"
+              className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded text-indigo-300 transition cursor-pointer"
+            >
+              {shareCopied ? <Check size={14} className="text-emerald-400" /> : <Share2 size={14} />}
+            </button>
+            <button
               onClick={handleExport}
-              title="설정 내보내기"
-              className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 transition"
+              title="설정 내보내기 (JSON)"
+              className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 transition cursor-pointer"
             >
               <Download size={14} />
             </button>
             <button
               onClick={() => jsonFileInputRef.current?.click()}
               title="설정 가져오기 (JSON)"
-              className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 transition"
+              className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 transition cursor-pointer"
             >
               <Upload size={14} />
             </button>
             <button
               onClick={() => swaggerFileInputRef.current?.click()}
               title="Swagger/OpenAPI 자동 파싱"
-              className="p-1.5 bg-indigo-950 border border-indigo-700 hover:bg-indigo-900 rounded text-indigo-300 transition"
+              className="p-1.5 bg-indigo-950 border border-indigo-700 hover:bg-indigo-900 rounded text-indigo-300 transition cursor-pointer"
             >
               <FileCode size={14} />
             </button>
@@ -238,14 +328,14 @@ export default function App() {
 
             <button
               onClick={addEndpoint}
-              className="flex items-center gap-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-2 py-1.5 rounded transition font-medium ml-1"
+              className="flex items-center gap-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-2 py-1.5 rounded transition font-medium ml-1 cursor-pointer"
             >
               <Plus size={14} /> 추가
             </button>
           </div>
         </div>
 
-        {/* 시나리오/프리셋 선택 바 */}
+        {/* 시나리오 프리셋 영역 */}
         <div className="p-3 border-b border-slate-800/80 bg-slate-900/60 flex flex-col gap-2">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-400">
             <span className="flex items-center gap-1"><Layers size={13} /> 시나리오 프리셋</span>
@@ -271,74 +361,114 @@ export default function App() {
             />
             <button
               onClick={handleCreatePreset}
-              className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] px-2 rounded"
+              className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] px-2 rounded cursor-pointer"
             >
               저장
             </button>
           </div>
         </div>
 
-        {/* Endpoint List */}
-        <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
-          {endpoints.map((ep) => {
-            const isSelected = ep.id === selectedId
-            const methodColors: Record<string, string> = {
-              GET: 'text-green-400 bg-green-950/50 border-green-800',
-              POST: 'text-blue-400 bg-blue-950/50 border-blue-800',
-              PUT: 'text-amber-400 bg-amber-950/50 border-amber-800',
-              DELETE: 'text-red-400 bg-red-950/50 border-red-800',
-            }
-
-            return (
-              <div
-                key={ep.id}
-                onClick={() => selectEndpoint(ep.id)}
-                className={`p-3 rounded-lg border cursor-pointer transition flex items-center justify-between ${
-                  isSelected
-                    ? 'border-indigo-500 bg-slate-800/80'
-                    : 'border-slate-800/60 bg-slate-900/40 hover:bg-slate-800/40'
+        {/* 경로 검색 및 메서드 필터 영역 */}
+        <div className="p-2.5 border-b border-slate-800/80 bg-slate-950 space-y-2">
+          <div className="relative">
+            <Search size={13} className="absolute left-2.5 top-2 text-slate-500" />
+            <input
+              type="text"
+              placeholder="API 경로 검색 (예: /users)..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-800 rounded pl-8 pr-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+          <div className="flex items-center gap-1">
+            {(['ALL', 'GET', 'POST', 'PUT', 'DELETE'] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setMethodFilter(m)}
+                className={`flex-1 py-1 rounded text-[10px] font-bold transition cursor-pointer ${
+                  methodFilter === m
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-slate-900 text-slate-400 hover:bg-slate-800'
                 }`}
               >
-                <div className="flex items-center gap-2 overflow-hidden">
-                  <span
-                    className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
-                      methodColors[ep.method]
-                    }`}
-                  >
-                    {ep.method}
-                  </span>
-                  <span className="text-sm font-mono truncate text-slate-200">
-                    {ep.path}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  {ep.requireAuth && (
-                    <span title="Auth 토큰 필수" className="text-amber-400">
-                      <ShieldAlert size={13} />
+                {m}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 엔드포인트 목록 */}
+        <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+          {filteredEndpoints.length === 0 ? (
+            <div className="p-4 text-center text-xs text-slate-600">
+              일치하는 엔드포인트가 없습니다.
+            </div>
+          ) : (
+            filteredEndpoints.map((ep) => {
+              const isSelected = ep.id === selectedId
+              const methodColors: Record<string, string> = {
+                GET: 'text-green-400 bg-green-950/50 border-green-800',
+                POST: 'text-blue-400 bg-blue-950/50 border-blue-800',
+                PUT: 'text-amber-400 bg-amber-950/50 border-amber-800',
+                DELETE: 'text-red-400 bg-red-950/50 border-red-800',
+              }
+
+              return (
+                <div
+                  key={ep.id}
+                  onClick={() => selectEndpoint(ep.id)}
+                  className={`p-3 rounded-lg border cursor-pointer transition flex items-center justify-between ${
+                    isSelected
+                      ? 'border-indigo-500 bg-slate-800/80'
+                      : 'border-slate-800/60 bg-slate-900/40 hover:bg-slate-800/40'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 overflow-hidden">
+                    <span
+                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
+                        methodColors[ep.method]
+                      }`}
+                    >
+                      {ep.method}
                     </span>
-                  )}
-                  {(ep.failureRate || 0) > 0 && (
-                    <span title={`Chaos 장애율 ${ep.failureRate}%`} className="text-rose-400">
-                      <Flame size={13} />
+                    <span className="text-sm font-mono truncate text-slate-200">
+                      {ep.path}
                     </span>
-                  )}
-                  <input
-                    type="checkbox"
-                    checked={ep.enabled}
-                    onChange={(e) => {
-                      e.stopPropagation()
-                      toggleEndpoint(ep.id)
-                    }}
-                    className="accent-indigo-500 cursor-pointer ml-1"
-                  />
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {(ep.rules || []).length > 0 && (
+                      <span title={`다중 응답 규칙 ${(ep.rules || []).length}개`} className="text-sky-400">
+                        <GitBranch size={13} />
+                      </span>
+                    )}
+                    {ep.requireAuth && (
+                      <span title="Auth 토큰 필수" className="text-amber-400">
+                        <ShieldAlert size={13} />
+                      </span>
+                    )}
+                    {(ep.failureRate || 0) > 0 && (
+                      <span title={`Chaos 장애율 ${ep.failureRate}%`} className="text-rose-400">
+                        <Flame size={13} />
+                      </span>
+                    )}
+                    <input
+                      type="checkbox"
+                      checked={ep.enabled}
+                      onChange={(e) => {
+                        e.stopPropagation()
+                        toggleEndpoint(ep.id)
+                      }}
+                      className="accent-indigo-500 cursor-pointer ml-1"
+                    />
+                  </div>
                 </div>
-              </div>
-            )
-          })}
+              )
+            })
+          )}
         </div>
       </aside>
 
-      {/* Main View */}
+      {/* 우측 메인 편집 및 로그 영역 */}
       <main className="flex-1 flex flex-col bg-slate-900 overflow-hidden">
         {selectedEndpoint ? (
           <>
@@ -399,7 +529,7 @@ export default function App() {
               <div className="h-4 w-[1px] bg-slate-800 mx-1" />
 
               <div className="flex items-center gap-1.5">
-                <span className="text-xs text-slate-400">Status:</span>
+                <span className="text-xs text-slate-400">Default Status:</span>
                 <input
                   type="number"
                   value={selectedEndpoint.status}
@@ -431,14 +561,14 @@ export default function App() {
 
               <button
                 onClick={() => deleteEndpoint(selectedEndpoint.id)}
-                className="p-2 bg-red-950/40 hover:bg-red-900/60 text-red-400 border border-red-900/50 rounded transition"
+                className="p-2 bg-red-950/40 hover:bg-red-900/60 text-red-400 border border-red-900/50 rounded transition cursor-pointer"
                 title="엔드포인트 삭제"
               >
                 <Trash2 size={15} />
               </button>
             </header>
 
-            {/* 💡 [Phase 3] 실무 예외 시뮬레이션 바 (Auth Guard & Chaos Mode) */}
+            {/* 예외 시뮬레이션 설정 및 탭 전환 바 */}
             <div className="px-4 py-2 bg-slate-950/80 border-b border-slate-800 flex flex-wrap items-center justify-between gap-4 text-xs">
               <div className="flex items-center gap-6">
                 <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -451,7 +581,7 @@ export default function App() {
                     className="accent-amber-500 cursor-pointer"
                   />
                   <span className="flex items-center gap-1 font-medium text-amber-300">
-                    <ShieldAlert size={14} /> Auth 토큰 가드 (미포함 시 401 반환)
+                    <ShieldAlert size={14} /> Auth 토큰 가드 (401)
                   </span>
                 </label>
 
@@ -468,15 +598,15 @@ export default function App() {
                     onChange={(e) =>
                       updateEndpoint(selectedEndpoint.id, { failureRate: Number(e.target.value) })
                     }
-                    className="w-28 accent-rose-500 cursor-pointer"
+                    className="w-24 accent-rose-500 cursor-pointer"
                   />
-                  <span className="font-mono text-rose-300 w-9">
+                  <span className="font-mono text-rose-300 w-8">
                     {selectedEndpoint.failureRate || 0}%
                   </span>
                 </div>
               </div>
 
-              {/* 에디터 탭 전환 버튼 */}
+              {/* 편집기 탭 전환 버튼 */}
               <div className="flex items-center bg-slate-900 p-0.5 rounded-lg border border-slate-800">
                 <button
                   onClick={() => setActiveTab('body')}
@@ -486,7 +616,18 @@ export default function App() {
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  Response Body
+                  Default Body
+                </button>
+                <button
+                  onClick={() => setActiveTab('rules')}
+                  className={`px-3 py-1 rounded-md text-xs font-medium transition cursor-pointer flex items-center gap-1 ${
+                    activeTab === 'rules'
+                      ? 'bg-indigo-600 text-white'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <GitBranch size={12} />
+                  Rules ({(selectedEndpoint.rules || []).length})
                 </button>
                 <button
                   onClick={() => setActiveTab('headers')}
@@ -501,7 +642,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* 테스트 요청용 Query, Body, Authorization 설정 패널 */}
+            {/* 인앱 테스트 파라미터 입력 영역 */}
             {showTestConfig && (
               <div className="px-4 py-2.5 bg-slate-900/95 border-b border-slate-800 flex flex-wrap items-center gap-4 text-xs">
                 <div className="flex items-center gap-2 flex-1 min-w-[200px]">
@@ -510,7 +651,7 @@ export default function App() {
                     type="text"
                     value={testQuery}
                     onChange={(e) => setTestQuery(e.target.value)}
-                    placeholder="예: role=admin"
+                    placeholder="예: role=guest"
                     className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1 font-mono text-indigo-300 focus:outline-none"
                   />
                 </div>
@@ -548,8 +689,8 @@ export default function App() {
               </div>
             )}
 
-            {/* 탭 1: Response Body 에디터 */}
-            {activeTab === 'body' ? (
+            {/* 기본 Response Body 편집 탭 */}
+            {activeTab === 'body' && (
               <>
                 <div className="px-4 py-2 bg-slate-900/90 border-b border-slate-800 flex items-center gap-2 overflow-x-auto">
                   <span className="flex items-center gap-1 text-[11px] font-semibold text-indigo-400 whitespace-nowrap mr-1">
@@ -587,8 +728,145 @@ export default function App() {
                   />
                 </div>
               </>
-            ) : (
-              /* 💡 [Phase 3] 탭 2: 커스텀 Response Headers 편집기 */
+            )}
+
+            {/* 다중 조건부 응답 규칙(Rules) 편집 탭 */}
+            {activeTab === 'rules' && (
+              <div className="flex-[3] p-4 overflow-y-auto bg-slate-900 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-200 flex items-center gap-1.5">
+                      <GitBranch size={15} className="text-sky-400" />
+                      다중 응답 분기 규칙 (Multiple Response Rules)
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      특정 Query/Body 조건이 일치할 때 자동 반환되거나, 수동으로 고정할 응답 케이스를 관리합니다.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={selectedEndpoint.activeRuleId || ''}
+                      onChange={(e) =>
+                        updateEndpoint(selectedEndpoint.id, {
+                          activeRuleId: e.target.value || null,
+                        })
+                      }
+                      className="bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-sky-300 font-medium focus:outline-none"
+                    >
+                      <option value="">자동 조건 매칭 (기본값)</option>
+                      {(selectedEndpoint.rules || []).map((r) => (
+                        <option key={r.id} value={r.id}>
+                          강제 고정: {r.name} ({r.status})
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={handleAddRule}
+                      className="flex items-center gap-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-1.5 rounded font-medium transition cursor-pointer"
+                    >
+                      <Plus size={14} /> 규칙 추가
+                    </button>
+                  </div>
+                </div>
+
+                {(selectedEndpoint.rules || []).length === 0 ? (
+                  <div className="p-6 border border-dashed border-slate-800 rounded-lg text-center text-xs text-slate-500">
+                    등록된 조건부 응답 규칙이 없습니다. 우측 상단 [규칙 추가]를 눌러 예외 케이스를 만들어 보세요.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {(selectedEndpoint.rules || []).map((rule) => (
+                      <div
+                        key={rule.id}
+                        className="p-3 bg-slate-950 border border-slate-800 rounded-lg space-y-2.5"
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <input
+                            type="text"
+                            value={rule.name}
+                            onChange={(e) => handleUpdateRule(rule.id, { name: e.target.value })}
+                            placeholder="규칙 이름 (예: 게스트 403 차단)"
+                            className="bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs font-semibold text-slate-200 focus:outline-none"
+                          />
+
+                          <div className="flex items-center gap-1">
+                            <span className="text-[11px] text-slate-400">Status:</span>
+                            <input
+                              type="number"
+                              value={rule.status}
+                              onChange={(e) =>
+                                handleUpdateRule(rule.id, { status: Number(e.target.value) })
+                              }
+                              className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs font-mono text-amber-300 focus:outline-none"
+                            />
+                          </div>
+
+                          <div className="flex items-center gap-1.5 ml-auto">
+                            <span className="text-[11px] text-slate-400">발동 조건:</span>
+                            <select
+                              value={rule.conditionType || 'none'}
+                              onChange={(e) =>
+                                handleUpdateRule(rule.id, {
+                                  conditionType: e.target.value as ResponseRule['conditionType'],
+                                })
+                              }
+                              className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-indigo-300 focus:outline-none"
+                            >
+                              <option value="none">수동 선택 시에만</option>
+                              <option value="query">Query 파라미터 일치</option>
+                              <option value="body">Body 필드 일치</option>
+                            </select>
+
+                            {rule.conditionType && rule.conditionType !== 'none' && (
+                              <>
+                                <input
+                                  type="text"
+                                  placeholder="Key (예: role)"
+                                  value={rule.conditionKey || ''}
+                                  onChange={(e) =>
+                                    handleUpdateRule(rule.id, { conditionKey: e.target.value })
+                                  }
+                                  className="w-24 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs font-mono text-sky-300 focus:outline-none"
+                                />
+                                <span className="text-slate-500 text-xs">=</span>
+                                <input
+                                  type="text"
+                                  placeholder="Value (예: guest)"
+                                  value={rule.conditionValue || ''}
+                                  onChange={(e) =>
+                                    handleUpdateRule(rule.id, { conditionValue: e.target.value })
+                                  }
+                                  className="w-24 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs font-mono text-emerald-300 focus:outline-none"
+                                />
+                              </>
+                            )}
+
+                            <button
+                              onClick={() => handleRemoveRule(rule.id)}
+                              className="p-1.5 bg-red-950/40 hover:bg-red-900/60 text-red-400 border border-red-900/50 rounded transition cursor-pointer ml-1"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </div>
+
+                        <textarea
+                          rows={4}
+                          value={rule.responseBody}
+                          onChange={(e) =>
+                            handleUpdateRule(rule.id, { responseBody: e.target.value })
+                          }
+                          className="w-full bg-slate-900 border border-slate-800 rounded p-2 font-mono text-xs text-emerald-300 focus:outline-none"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 커스텀 Response Headers 편집 탭 */}
+            {activeTab === 'headers' && (
               <div className="flex-[3] p-4 overflow-y-auto bg-slate-900 space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
@@ -640,21 +918,21 @@ export default function App() {
               </div>
             )}
 
-            {/* Inspector Panel */}
+            {/* 하단 실시간 트래픽 로그 패널 */}
             <div className="flex-[2] border-t border-slate-800 bg-slate-950 flex flex-col overflow-hidden">
               <div className="px-4 py-2 border-b border-slate-800 flex items-center justify-between bg-slate-900/60">
                 <div className="flex items-center gap-2 text-xs font-semibold text-slate-300">
                   <Terminal size={14} className="text-indigo-400" />
                   실시간 네트워크 트래픽 로그 (클릭하여 응답 상세 보기)
                 </div>
-                <button onClick={clearLogs} className="text-[11px] text-slate-400 hover:text-white transition">
+                <button onClick={clearLogs} className="text-[11px] text-slate-400 hover:text-white transition cursor-pointer">
                   로그 비우기
                 </button>
               </div>
               <div className="flex-1 overflow-y-auto p-2 font-mono text-xs space-y-1">
                 {logs.length === 0 ? (
                   <div className="p-2 text-slate-600 italic">
-                    가로챈 요청이 없습니다. 상단의 초록색 [Send] 버튼을 눌러 테스트해 보세요!
+                    가로챈 요청이 없습니다. 상단의 초록색 [Send] 버튼을 눌러 테스트해 보세요.
                   </div>
                 ) : (
                   logs.map((log) => {
@@ -673,14 +951,19 @@ export default function App() {
                             <span className="font-bold text-indigo-400">{log.method}</span>
                             <span className="text-slate-200">{log.path}</span>
 
+                            {log.matchedRuleName && (
+                              <span className="text-sky-300 text-[10px] bg-sky-950/70 px-1.5 py-0.5 rounded border border-sky-700 font-semibold">
+                                규칙: {log.matchedRuleName}
+                              </span>
+                            )}
                             {log.errorReason === 'AUTH_GUARD' && (
                               <span className="text-amber-300 text-[10px] bg-amber-950/70 px-1.5 py-0.5 rounded border border-amber-700 font-semibold">
-                                🔒 Auth Guard 차단
+                                Auth Guard 차단
                               </span>
                             )}
                             {log.errorReason === 'CHAOS_MODE' && (
                               <span className="text-rose-300 text-[10px] bg-rose-950/70 px-1.5 py-0.5 rounded border border-rose-700 font-semibold">
-                                ⚡ Chaos 장애 발생
+                                Chaos 장애 발생
                               </span>
                             )}
                             {log.matchedParams && Object.keys(log.matchedParams).length > 0 && (

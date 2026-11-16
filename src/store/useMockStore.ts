@@ -7,6 +7,17 @@ export interface HeaderItem {
   value: string
 }
 
+// 조건부 다중 응답 규칙 타입
+export interface ResponseRule {
+  id: string
+  name: string
+  status: number
+  responseBody: string
+  conditionType?: 'none' | 'query' | 'body'
+  conditionKey?: string
+  conditionValue?: string
+}
+
 export interface MockEndpoint {
   id: string
   method: 'GET' | 'POST' | 'PUT' | 'DELETE'
@@ -15,10 +26,11 @@ export interface MockEndpoint {
   responseBody: string
   delay: number
   enabled: boolean
-  // 💡 [Phase 3] 추가 필드
   requireAuth?: boolean
-  failureRate?: number // 0 ~ 100 (%)
+  failureRate?: number
   headers?: HeaderItem[]
+  rules?: ResponseRule[]
+  activeRuleId?: string | null // 특정 규칙 수동 고정 ID (null일 경우 자동 조건 매칭)
 }
 
 export interface NetworkLog {
@@ -32,9 +44,9 @@ export interface NetworkLog {
   matchedParams?: Record<string, string>
   matchedQuery?: Record<string, string>
   requestBody?: string
-  // 💡 [Phase 3] 추가 로그 정보
   responseHeaders?: Record<string, string>
   errorReason?: 'AUTH_GUARD' | 'CHAOS_MODE'
+  matchedRuleName?: string
 }
 
 export interface Preset {
@@ -86,6 +98,22 @@ const DEFAULT_ENDPOINTS: MockEndpoint[] = [
     requireAuth: false,
     failureRate: 0,
     headers: [{ id: 'h-1', key: 'X-Total-Count', value: '42' }],
+    activeRuleId: null,
+    rules: [
+      {
+        id: 'rule-guest',
+        name: '게스트 권한 제한 (403)',
+        status: 403,
+        responseBody: JSON.stringify(
+          { error: 'Forbidden', message: 'guest 역할은 상세 정보를 조회할 수 없습니다.' },
+          null,
+          2
+        ),
+        conditionType: 'query',
+        conditionKey: 'role',
+        conditionValue: 'guest',
+      },
+    ],
   },
   {
     id: '2',
@@ -106,6 +134,8 @@ const DEFAULT_ENDPOINTS: MockEndpoint[] = [
     requireAuth: false,
     failureRate: 0,
     headers: [],
+    activeRuleId: null,
+    rules: [],
   },
 ]
 
@@ -118,12 +148,12 @@ export const useMockStore = create<MockState>()(
       presets: [
         {
           id: 'default-happy',
-          name: '🟢 정상 동작 시나리오 (Happy Path)',
+          name: '정상 동작 시나리오 (Happy Path)',
           endpoints: DEFAULT_ENDPOINTS,
         },
         {
           id: 'default-error',
-          name: '🔴 전체 서버 장애 시나리오 (500 Error)',
+          name: '전체 서버 장애 시나리오 (500 Error)',
           endpoints: DEFAULT_ENDPOINTS.map((ep) => ({
             ...ep,
             status: 500,
@@ -155,6 +185,8 @@ export const useMockStore = create<MockState>()(
           requireAuth: false,
           failureRate: 0,
           headers: [],
+          activeRuleId: null,
+          rules: [],
         }
         set((state) => ({
           endpoints: [newEp, ...state.endpoints],
@@ -261,6 +293,8 @@ export const useMockStore = create<MockState>()(
                   requireAuth: false,
                   failureRate: 0,
                   headers: [],
+                  activeRuleId: null,
+                  rules: [],
                 })
               }
             })
@@ -271,7 +305,7 @@ export const useMockStore = create<MockState>()(
               endpoints: importedEndpoints,
               selectedId: importedEndpoints[0].id,
             })
-            alert(`Swagger 파싱 성공: 총 ${importedEndpoints.length}개의 엔드포인트가 생성되었습니다!`)
+            alert(`Swagger 파싱 성공: 총 ${importedEndpoints.length}개의 엔드포인트가 생성되었습니다.`)
           } else {
             alert('유효한 OpenAPI/Swagger Path를 찾을 수 없습니다.')
           }
