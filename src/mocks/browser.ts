@@ -48,13 +48,11 @@ function resolveMatchingRule(
   const rules = ep.rules || []
   if (rules.length === 0) return null
 
-  // 수동으로 고정된 규칙이 있으면 우선 적용
   if (ep.activeRuleId) {
     const forced = rules.find((r) => r.id === ep.activeRuleId)
     if (forced) return forced
   }
 
-  // Query 또는 Body 조건이 일치하는 첫 번째 규칙 반환
   for (const rule of rules) {
     if (rule.conditionType === 'query' && rule.conditionKey) {
       if (String(queryObj[rule.conditionKey]) === String(rule.conditionValue || '')) {
@@ -68,6 +66,101 @@ function resolveMatchingRule(
   }
 
   return null
+}
+
+// 인메모리 가상 DB CRUD 실행기
+function executeStatefulCrud(
+  ep: MockEndpoint,
+  params: Record<string, any>,
+  queryObj: Record<string, string>,
+  reqBodyObj: Record<string, any>
+): { status: number; body: any; actionLabel: string } {
+  const colName = (ep.collectionName || 'users').trim()
+  const store = useMockStore.getState()
+  const list = [...(store.collections[colName] || [])]
+  const targetId = params.id !== undefined ? String(params.id) : undefined
+
+  if (ep.method === 'GET') {
+    if (targetId) {
+      const found = list.find((item) => String(item.id) === targetId)
+      if (!found) {
+        return {
+          status: 404,
+          body: { error: 'Not Found', message: `ID '${targetId}' 항목을 ${colName}에서 찾을 수 없습니다.` },
+          actionLabel: `DB 단건 조회 실패 (${colName}#${targetId})`,
+        }
+      }
+      return {
+        status: 200,
+        body: found,
+        actionLabel: `DB 단건 조회 (${colName}#${targetId})`,
+      }
+    }
+
+    // Query 파라미터 필터링 지원
+    const filtered = list.filter((item) =>
+      Object.entries(queryObj).every(([k, v]) => String(item[k]) === String(v))
+    )
+    return {
+      status: 200,
+      body: filtered,
+      actionLabel: `DB 목록 조회 (${colName}: ${filtered.length}건)`,
+    }
+  }
+
+  if (ep.method === 'POST') {
+    const newItem = {
+      id: reqBodyObj.id ? String(reqBodyObj.id) : String(Date.now()).slice(-4),
+      ...reqBodyObj,
+      createdAt: new Date().toISOString(),
+    }
+    store.setCollectionData(colName, [...list, newItem])
+    return {
+      status: 201,
+      body: newItem,
+      actionLabel: `DB 항목 생성 (${colName}#${newItem.id})`,
+    }
+  }
+
+  if (ep.method === 'PUT') {
+    const idToUpdate = targetId || (reqBodyObj.id ? String(reqBodyObj.id) : '')
+    const index = list.findIndex((item) => String(item.id) === idToUpdate)
+    if (index === -1) {
+      return {
+        status: 404,
+        body: { error: 'Not Found', message: `수정할 ID '${idToUpdate}' 항목이 없습니다.` },
+        actionLabel: `DB 수정 실패 (${colName}#${idToUpdate})`,
+      }
+    }
+    const updatedItem = { ...list[index], ...reqBodyObj, updatedAt: new Date().toISOString() }
+    list[index] = updatedItem
+    store.setCollectionData(colName, list)
+    return {
+      status: 200,
+      body: updatedItem,
+      actionLabel: `DB 항목 수정 (${colName}#${idToUpdate})`,
+    }
+  }
+
+  if (ep.method === 'DELETE') {
+    const idToDelete = targetId || queryObj.id || ''
+    const nextList = list.filter((item) => String(item.id) !== String(idToDelete))
+    if (nextList.length === list.length) {
+      return {
+        status: 404,
+        body: { error: 'Not Found', message: `삭제할 ID '${idToDelete}' 항목이 없습니다.` },
+        actionLabel: `DB 삭제 실패 (${colName}#${idToDelete})`,
+      }
+    }
+    store.setCollectionData(colName, nextList)
+    return {
+      status: 200,
+      body: { deletedId: idToDelete, message: '정상적으로 삭제되었습니다.' },
+      actionLabel: `DB 항목 삭제 (${colName}#${idToDelete})`,
+    }
+  }
+
+  return { status: ep.status, body: {}, actionLabel: 'DB 작업 없음' }
 }
 
 function createDynamicHandlers(endpoints: MockEndpoint[]) {
@@ -163,12 +256,40 @@ function createDynamicHandlers(endpoints: MockEndpoint[]) {
           return HttpResponse.json(chaosErrorBody, { status: 500, headers: customHeaders })
         }
 
-        // 조건부 응답 규칙 매칭 확인
+        // 가상 CRUD DB 모드가 활성화된 경우 컬렉션 기반으로 응답 처리
+        if (ep.useStatefulDb) {
+          const crudResult = executeStatefulCrud(
+            ep,
+            (params as Record<string, any>) || {},
+            queryObj,
+            reqBodyObj
+          )
+          const duration = Math.round(performance.now() - startTime)
+
+          useMockStore.getState().addLog({
+            method: ep.method,
+            path: requestUrl.pathname + requestUrl.search,
+            status: crudResult.status,
+            duration,
+            responseBody: JSON.stringify(crudResult.body, null, 2),
+            matchedParams: params as Record<string, string>,
+            matchedQuery: Object.keys(queryObj).length > 0 ? queryObj : undefined,
+            requestBody: rawReqBody || undefined,
+            responseHeaders: Object.keys(customHeaders).length > 0 ? customHeaders : undefined,
+            statefulAction: crudResult.actionLabel,
+          })
+
+          return HttpResponse.json(crudResult.body, {
+            status: crudResult.status,
+            headers: customHeaders,
+          })
+        }
+
+        // 일반 모드: 조건부 응답 규칙 매칭 확인 후 템플릿 치환
         const matchedRule = resolveMatchingRule(ep, queryObj, reqBodyObj)
         const targetStatus = matchedRule ? matchedRule.status : ep.status
         const targetBodyTemplate = matchedRule ? matchedRule.responseBody : ep.responseBody
 
-        // 응답 템플릿 치환 및 최종 반환
         const interpolatedBodyString = interpolateBody(targetBodyTemplate, {
           params: (params as Record<string, any>) || {},
           query: queryObj,

@@ -30,7 +30,10 @@ export interface MockEndpoint {
   failureRate?: number
   headers?: HeaderItem[]
   rules?: ResponseRule[]
-  activeRuleId?: string | null // 특정 규칙 수동 고정 ID (null일 경우 자동 조건 매칭)
+  activeRuleId?: string | null
+  // 가상 CRUD DB 연동 설정
+  useStatefulDb?: boolean
+  collectionName?: string
 }
 
 export interface NetworkLog {
@@ -47,6 +50,7 @@ export interface NetworkLog {
   responseHeaders?: Record<string, string>
   errorReason?: 'AUTH_GUARD' | 'CHAOS_MODE'
   matchedRuleName?: string
+  statefulAction?: string // 가상 DB 처리 내역 표시 (예: "users 컬렉션 조회")
 }
 
 export interface Preset {
@@ -61,6 +65,7 @@ interface MockState {
   logs: NetworkLog[]
   presets: Preset[]
   activePresetId: string | null
+  collections: Record<string, Record<string, any>[]>
 
   selectEndpoint: (id: string) => void
   addEndpoint: () => void
@@ -74,6 +79,22 @@ interface MockState {
   loadPreset: (presetId: string) => void
   deletePreset: (presetId: string) => void
   importSwaggerSpec: (swaggerJson: any) => void
+
+  // 가상 DB 컬렉션 제어 액션
+  setCollectionData: (name: string, data: Record<string, any>[]) => void
+  resetCollections: () => void
+}
+
+// 초기 가상 DB 샘플 데이터
+const INITIAL_COLLECTIONS: Record<string, Record<string, any>[]> = {
+  users: [
+    { id: '1', name: '김민수', role: 'admin', email: 'minsu@mocklab.dev' },
+    { id: '2', name: '이서연', role: 'developer', email: 'seoyeon@mocklab.dev' },
+  ],
+  todos: [
+    { id: '101', title: 'MSW v2 핸들러 고도화', completed: true },
+    { id: '102', title: '가상 CRUD DB 연동 테스트', completed: false },
+  ],
 }
 
 const DEFAULT_ENDPOINTS: MockEndpoint[] = [
@@ -99,6 +120,8 @@ const DEFAULT_ENDPOINTS: MockEndpoint[] = [
     failureRate: 0,
     headers: [{ id: 'h-1', key: 'X-Total-Count', value: '42' }],
     activeRuleId: null,
+    useStatefulDb: false,
+    collectionName: 'users',
     rules: [
       {
         id: 'rule-guest',
@@ -135,6 +158,8 @@ const DEFAULT_ENDPOINTS: MockEndpoint[] = [
     failureRate: 0,
     headers: [],
     activeRuleId: null,
+    useStatefulDb: false,
+    collectionName: 'users',
     rules: [],
   },
 ]
@@ -145,6 +170,7 @@ export const useMockStore = create<MockState>()(
       endpoints: DEFAULT_ENDPOINTS,
       selectedId: '1',
       logs: [],
+      collections: INITIAL_COLLECTIONS,
       presets: [
         {
           id: 'default-happy',
@@ -187,6 +213,8 @@ export const useMockStore = create<MockState>()(
           headers: [],
           activeRuleId: null,
           rules: [],
+          useStatefulDb: false,
+          collectionName: 'users',
         }
         set((state) => ({
           endpoints: [newEp, ...state.endpoints],
@@ -295,6 +323,8 @@ export const useMockStore = create<MockState>()(
                   headers: [],
                   activeRuleId: null,
                   rules: [],
+                  useStatefulDb: false,
+                  collectionName: 'users',
                 })
               }
             })
@@ -313,6 +343,16 @@ export const useMockStore = create<MockState>()(
           alert('Swagger JSON 파싱 중 오류가 발생했습니다.')
         }
       },
+
+      setCollectionData: (name, data) =>
+        set((state) => ({
+          collections: {
+            ...state.collections,
+            [name]: data,
+          },
+        })),
+
+      resetCollections: () => set({ collections: INITIAL_COLLECTIONS }),
     }),
     {
       name: 'mocklab-v2-storage',
