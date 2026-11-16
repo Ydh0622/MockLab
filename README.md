@@ -1,11 +1,11 @@
-# 🧪 MockLab
+#  MockLab
 
 > **Browser-based API Mocking & Network Inspection Tool**  
 > 백엔드 서버 없이 프론트엔드 환경에서 실시간으로 API를 모킹하고, 네트워크 트래픽을 가로채 검사할 수 있는 프로덕션급 개발자 도구입니다.
 
 ---
 
-## 🚀 Key Features (주요 기능)
+##  Key Features (주요 기능)
 
 ### 1. MSW v2 기반 실시간 네트워크 인터셉션
 * `MSW(Mock Service Worker)`를 활용하여 브라우저 레벨에서 실제 네트워크 요청을 가로채고, 사용자가 정의한 응답 규칙에 따라 동적으로 가짜 응답을 반환합니다.
