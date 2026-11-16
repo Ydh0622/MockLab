@@ -4,7 +4,7 @@ import { persist } from 'zustand/middleware'
 export interface MockEndpoint {
   id: string
   method: 'GET' | 'POST' | 'PUT' | 'DELETE'
-  path: string // 예: /api/users/:id
+  path: string
   status: number
   responseBody: string
   delay: number
@@ -17,6 +17,8 @@ export interface NetworkLog {
   method: string
   path: string
   status: number
+  duration: number
+  responseBody: string
   matchedParams?: Record<string, string>
 }
 
@@ -41,13 +43,9 @@ interface MockState {
   addLog: (log: Omit<NetworkLog, 'id' | 'timestamp'>) => void
   clearLogs: () => void
   importEndpoints: (data: MockEndpoint[]) => void
-  
-  // 시나리오/프리셋 기능
   saveCurrentAsPreset: (name: string) => void
   loadPreset: (presetId: string) => void
   deletePreset: (presetId: string) => void
-
-  // Swagger/OpenAPI 파싱 기능
   importSwaggerSpec: (swaggerJson: any) => void
 }
 
@@ -153,7 +151,6 @@ export const useMockStore = create<MockState>()(
 
       importEndpoints: (data) => set({ endpoints: data, selectedId: data[0]?.id || null }),
 
-      // 🎭 프리셋 관련 액션
       saveCurrentAsPreset: (name) =>
         set((state) => {
           const newPreset: Preset = {
@@ -184,7 +181,6 @@ export const useMockStore = create<MockState>()(
           activePresetId: state.activePresetId === presetId ? null : state.activePresetId,
         })),
 
-      // 📄 Swagger/OpenAPI 명세 자동 파싱
       importSwaggerSpec: (swaggerJson) => {
         try {
           const importedEndpoints: MockEndpoint[] = []
@@ -195,9 +191,7 @@ export const useMockStore = create<MockState>()(
             Object.keys(methods).forEach((methodKey) => {
               const upperMethod = methodKey.toUpperCase() as MockEndpoint['method']
               if (['GET', 'POST', 'PUT', 'DELETE'].includes(upperMethod)) {
-                // Swagger Path 형태 (/users/{id})를 Express/MSW 형태 (/users/:id)로 변환
                 const formattedPath = pathKey.replace(/\{([^}]+)\}/g, ':$1')
-                
                 importedEndpoints.push({
                   id: `${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
                   method: upperMethod,
@@ -227,7 +221,7 @@ export const useMockStore = create<MockState>()(
           } else {
             alert('유효한 OpenAPI/Swagger Path를 찾을 수 없습니다.')
           }
-        } catch (e) {
+        } catch {
           alert('Swagger JSON 파싱 중 오류가 발생했습니다.')
         }
       },

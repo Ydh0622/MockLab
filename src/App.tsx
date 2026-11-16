@@ -1,6 +1,20 @@
 import React, { useRef, useState } from 'react'
 import Editor from '@monaco-editor/react'
-import { Plus, Trash2, Download, Upload, Terminal, Clock, Layers, FileCode } from 'lucide-react'
+import {
+  Plus,
+  Trash2,
+  Download,
+  Upload,
+  Terminal,
+  Clock,
+  Layers,
+  FileCode,
+  Play,
+  Copy,
+  Check,
+  ChevronDown,
+  ChevronRight,
+} from 'lucide-react'
 import { useMockStore } from './store/useMockStore'
 
 export default function App() {
@@ -19,17 +33,55 @@ export default function App() {
     importEndpoints,
     saveCurrentAsPreset,
     loadPreset,
-    deletePreset,
     importSwaggerSpec,
   } = useMockStore()
 
   const jsonFileInputRef = useRef<HTMLInputElement>(null)
   const swaggerFileInputRef = useRef<HTMLInputElement>(null)
   const [newPresetName, setNewPresetName] = useState('')
+  const [isSending, setIsSending] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [expandedLogId, setExpandedLogId] = useState<string | null>(null)
 
   const selectedEndpoint = endpoints.find((ep) => ep.id === selectedId)
 
-  // Export JSON
+  // :id 같은 Path Variable을 테스트용 기본값 '1'로 변환
+  const getTestablePath = (path: string) => {
+    return path.replace(/:([a-zA-Z0-9_]+)/g, '1')
+  }
+
+  // 인앱 API 요청 발송 (Send 버튼)
+  const handleSendRequest = async () => {
+    if (!selectedEndpoint) return
+    if (!selectedEndpoint.enabled) {
+      alert('비활성화된 엔드포인트입니다. 좌측 체크박스를 먼저 켜주세요!')
+      return
+    }
+
+    setIsSending(true)
+    const testUrl = getTestablePath(selectedEndpoint.path)
+
+    try {
+      await fetch(testUrl, {
+        method: selectedEndpoint.method,
+      })
+    } catch (error) {
+      console.error('Test request failed:', error)
+    } finally {
+      setIsSending(false)
+    }
+  }
+
+  // fetch 호출 코드 클립보드 복사
+  const handleCopyFetch = () => {
+    if (!selectedEndpoint) return
+    const testUrl = getTestablePath(selectedEndpoint.path)
+    const fetchCode = `fetch('${testUrl}', { method: '${selectedEndpoint.method}' })\n  .then(res => res.json())\n  .then(console.log);`
+    navigator.clipboard.writeText(fetchCode)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+
   const handleExport = () => {
     const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(endpoints, null, 2))
     const downloadAnchor = document.createElement('a')
@@ -40,7 +92,6 @@ export default function App() {
     downloadAnchor.remove()
   }
 
-  // Import JSON
   const handleImportJson = (e: React.ChangeEvent<HTMLInputElement>) => {
     const fileReader = new FileReader()
     if (e.target.files && e.target.files[0]) {
@@ -58,7 +109,6 @@ export default function App() {
     }
   }
 
-  // Import Swagger JSON
   const handleImportSwagger = (e: React.ChangeEvent<HTMLInputElement>) => {
     const fileReader = new FileReader()
     if (e.target.files && e.target.files[0]) {
@@ -85,7 +135,7 @@ export default function App() {
       {/* Sidebar */}
       <aside className="w-80 border-r border-slate-800 flex flex-col bg-slate-950">
         <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-          <h1 className="text-xl font-bold tracking-wide text-indigo-400">MockLab v2</h1>
+          <h1 className="text-xl font-bold tracking-wide text-indigo-400">MockLab v2.1</h1>
           <div className="flex items-center gap-1">
             <button
               onClick={handleExport}
@@ -110,7 +160,7 @@ export default function App() {
             </button>
             <input type="file" ref={jsonFileInputRef} onChange={handleImportJson} accept=".json" className="hidden" />
             <input type="file" ref={swaggerFileInputRef} onChange={handleImportSwagger} accept=".json" className="hidden" />
-            
+
             <button
               onClick={addEndpoint}
               className="flex items-center gap-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-2 py-1.5 rounded transition font-medium ml-1"
@@ -120,7 +170,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* 🎭 시나리오/프리셋 선택 바 */}
+        {/* 시나리오/프리셋 선택 바 */}
         <div className="p-3 border-b border-slate-800/80 bg-slate-900/60 flex flex-col gap-2">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-400">
             <span className="flex items-center gap-1"><Layers size={13} /> 시나리오 프리셋</span>
@@ -205,7 +255,7 @@ export default function App() {
       <main className="flex-1 flex flex-col bg-slate-900 overflow-hidden">
         {selectedEndpoint ? (
           <>
-            <header className="p-4 border-b border-slate-800 flex flex-wrap items-center gap-3 bg-slate-950/50">
+            <header className="p-4 border-b border-slate-800 flex flex-wrap items-center gap-2.5 bg-slate-950/50">
               <select
                 value={selectedEndpoint.method}
                 onChange={(e) =>
@@ -227,10 +277,31 @@ export default function App() {
                 onChange={(e) =>
                   updateEndpoint(selectedEndpoint.id, { path: e.target.value })
                 }
-                className="flex-1 min-w-[200px] bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm font-mono focus:outline-none"
+                className="flex-1 min-w-[180px] bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm font-mono focus:outline-none"
               />
 
-              <div className="flex items-center gap-2">
+              <button
+                onClick={handleSendRequest}
+                disabled={isSending}
+                className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold px-3 py-2 rounded transition shadow-sm cursor-pointer"
+                title="콘솔 없이 즉시 테스트 요청 보내기"
+              >
+                <Play size={13} fill="currentColor" />
+                {isSending ? '요청 중...' : 'Send'}
+              </button>
+
+              <button
+                onClick={handleCopyFetch}
+                className="flex items-center gap-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs px-2.5 py-2 rounded transition cursor-pointer"
+                title="fetch 호출 코드 복사"
+              >
+                {copied ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+                <span>{copied ? '복사됨' : 'fetch 복사'}</span>
+              </button>
+
+              <div className="h-4 w-[1px] bg-slate-800 mx-1" />
+
+              <div className="flex items-center gap-1.5">
                 <span className="text-xs text-slate-400">Status:</span>
                 <input
                   type="number"
@@ -240,13 +311,13 @@ export default function App() {
                       status: Number(e.target.value),
                     })
                   }
-                  className="w-20 bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm font-mono focus:outline-none"
+                  className="w-16 bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm font-mono focus:outline-none"
                 />
               </div>
 
               <div className="flex items-center gap-1.5">
                 <Clock size={14} className="text-slate-400" />
-                <span className="text-xs text-slate-400">Delay(ms):</span>
+                <span className="text-xs text-slate-400">Delay:</span>
                 <input
                   type="number"
                   step="100"
@@ -257,7 +328,7 @@ export default function App() {
                       delay: Number(e.target.value),
                     })
                   }
-                  className="w-20 bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm font-mono focus:outline-none"
+                  className="w-16 bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm font-mono focus:outline-none"
                 />
               </div>
 
@@ -266,7 +337,7 @@ export default function App() {
                 className="p-2 bg-red-950/40 hover:bg-red-900/60 text-red-400 border border-red-900/50 rounded transition"
                 title="엔드포인트 삭제"
               >
-                <Trash2 size={16} />
+                <Trash2 size={15} />
               </button>
             </header>
 
@@ -296,31 +367,66 @@ export default function App() {
               <div className="px-4 py-2 border-b border-slate-800 flex items-center justify-between bg-slate-900/60">
                 <div className="flex items-center gap-2 text-xs font-semibold text-slate-300">
                   <Terminal size={14} className="text-indigo-400" />
-                  실시간 네트워크 트래픽 로그 (Inspector)
+                  실시간 네트워크 트래픽 로그 (클릭하여 응답 상세 보기)
                 </div>
                 <button onClick={clearLogs} className="text-[11px] text-slate-400 hover:text-white transition">
                   로그 비우기
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto p-3 font-mono text-xs space-y-1">
+              <div className="flex-1 overflow-y-auto p-2 font-mono text-xs space-y-1">
                 {logs.length === 0 ? (
-                  <div className="text-slate-600 italic">가로챈 요청이 없습니다.</div>
+                  <div className="p-2 text-slate-600 italic">
+                    가로챈 요청이 없습니다. 상단의 초록색 [Send] 버튼을 눌러 테스트해 보세요!
+                  </div>
                 ) : (
-                  logs.map((log) => (
-                    <div key={log.id} className="flex items-center gap-3 text-slate-300">
-                      <span className="text-slate-500">{log.timestamp}</span>
-                      <span className="font-bold text-indigo-400">{log.method}</span>
-                      <span className="text-slate-200">{log.path}</span>
-                      {log.matchedParams && Object.keys(log.matchedParams).length > 0 && (
-                        <span className="text-amber-400 text-[11px]">
-                          Params: {JSON.stringify(log.matchedParams)}
-                        </span>
-                      )}
-                      <span className="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800">
-                        {log.status} OK
-                      </span>
-                    </div>
-                  ))
+                  logs.map((log) => {
+                    const isExpanded = expandedLogId === log.id
+                    const isError = log.status >= 400
+
+                    return (
+                      <div key={log.id} className="border border-slate-800/80 rounded bg-slate-900/40 overflow-hidden">
+                        <div
+                          onClick={() => setExpandedLogId(isExpanded ? null : log.id)}
+                          className="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-slate-800/50 transition"
+                        >
+                          <div className="flex items-center gap-3">
+                            {isExpanded ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}
+                            <span className="text-slate-500">{log.timestamp}</span>
+                            <span className="font-bold text-indigo-400">{log.method}</span>
+                            <span className="text-slate-200">{log.path}</span>
+                            {log.matchedParams && Object.keys(log.matchedParams).length > 0 && (
+                              <span className="text-amber-400 text-[11px] bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-900/50">
+                                Params: {JSON.stringify(log.matchedParams)}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-slate-500 text-[11px]">{log.duration}ms</span>
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[11px] border ${
+                                isError
+                                  ? 'bg-red-950 text-red-400 border-red-800'
+                                  : 'bg-emerald-950 text-emerald-400 border-emerald-800'
+                              }`}
+                            >
+                              {log.status}
+                            </span>
+                          </div>
+                        </div>
+
+                        {isExpanded && (
+                          <div className="px-4 py-2.5 bg-slate-950 border-t border-slate-800/80 text-slate-300">
+                            <div className="text-[10px] text-slate-500 mb-1 uppercase tracking-wider font-semibold">
+                              Response Body
+                            </div>
+                            <pre className="text-xs text-emerald-300 overflow-x-auto whitespace-pre-wrap">
+                              {log.responseBody}
+                            </pre>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })
                 )}
               </div>
             </div>

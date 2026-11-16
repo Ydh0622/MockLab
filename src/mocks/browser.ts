@@ -4,7 +4,6 @@ import { useMockStore, MockEndpoint } from '../store/useMockStore'
 
 export const worker = setupWorker()
 
-// 💡 Response Body 내의 {{params.xxx}} 동적 변수를 URL Path 파라미터 값으로 치환하는 함수
 function interpolateBody(template: string, params: Record<string, any>) {
   let result = template
   Object.keys(params).forEach((key) => {
@@ -21,21 +20,13 @@ function createDynamicHandlers(endpoints: MockEndpoint[]) {
     .map((ep) => {
       const method = ep.method.toLowerCase() as 'get' | 'post' | 'put' | 'delete'
 
-      return http[method](ep.path, async ({ params }) => {
-        // 1. 지연 시간 적용
+      return http[method](ep.path, async ({ request, params }) => {
+        const startTime = performance.now()
+
         if (ep.delay > 0) {
           await mswDelay(ep.delay)
         }
 
-        // 2. 실시간 로그 기록
-        useMockStore.getState().addLog({
-          method: ep.method,
-          path: ep.path,
-          status: ep.status,
-          matchedParams: params as Record<string, string>,
-        })
-
-        // 3. Path Variable 치환 후 JSON 파싱
         const interpolatedBodyString = interpolateBody(ep.responseBody, params || {})
 
         let parsedBody = {}
@@ -44,6 +35,18 @@ function createDynamicHandlers(endpoints: MockEndpoint[]) {
         } catch {
           parsedBody = { raw: interpolatedBodyString }
         }
+
+        const duration = Math.round(performance.now() - startTime)
+        const requestUrl = new URL(request.url)
+
+        useMockStore.getState().addLog({
+          method: ep.method,
+          path: requestUrl.pathname + requestUrl.search,
+          status: ep.status,
+          duration,
+          responseBody: JSON.stringify(parsedBody, null, 2),
+          matchedParams: params as Record<string, string>,
+        })
 
         return HttpResponse.json(parsedBody, { status: ep.status })
       })
