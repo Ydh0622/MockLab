@@ -1,6 +1,12 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+export interface HeaderItem {
+  id: string
+  key: string
+  value: string
+}
+
 export interface MockEndpoint {
   id: string
   method: 'GET' | 'POST' | 'PUT' | 'DELETE'
@@ -9,6 +15,10 @@ export interface MockEndpoint {
   responseBody: string
   delay: number
   enabled: boolean
+  // 💡 [Phase 3] 추가 필드
+  requireAuth?: boolean
+  failureRate?: number // 0 ~ 100 (%)
+  headers?: HeaderItem[]
 }
 
 export interface NetworkLog {
@@ -20,8 +30,11 @@ export interface NetworkLog {
   duration: number
   responseBody: string
   matchedParams?: Record<string, string>
-  matchedQuery?: Record<string, string> // 💡 [Phase 2] Query 파라미터 기록
-  requestBody?: string                  // 💡 [Phase 2] 요청 Body 기록
+  matchedQuery?: Record<string, string>
+  requestBody?: string
+  // 💡 [Phase 3] 추가 로그 정보
+  responseHeaders?: Record<string, string>
+  errorReason?: 'AUTH_GUARD' | 'CHAOS_MODE'
 }
 
 export interface Preset {
@@ -70,6 +83,9 @@ const DEFAULT_ENDPOINTS: MockEndpoint[] = [
     ),
     delay: 0,
     enabled: true,
+    requireAuth: false,
+    failureRate: 0,
+    headers: [{ id: 'h-1', key: 'X-Total-Count', value: '42' }],
   },
   {
     id: '2',
@@ -87,6 +103,9 @@ const DEFAULT_ENDPOINTS: MockEndpoint[] = [
     ),
     delay: 300,
     enabled: true,
+    requireAuth: false,
+    failureRate: 0,
+    headers: [],
   },
 ]
 
@@ -133,6 +152,9 @@ export const useMockStore = create<MockState>()(
           ),
           delay: 0,
           enabled: true,
+          requireAuth: false,
+          failureRate: 0,
+          headers: [],
         }
         set((state) => ({
           endpoints: [newEp, ...state.endpoints],
@@ -236,6 +258,9 @@ export const useMockStore = create<MockState>()(
                   ),
                   delay: 0,
                   enabled: true,
+                  requireAuth: false,
+                  failureRate: 0,
+                  headers: [],
                 })
               }
             })
